@@ -30,11 +30,12 @@ public class DesignationServiceImpl implements DesignationService {
     @Override
     @Transactional
     public DesignationResponse create(DesignationRequest request) {
-        if (designationRepository.existsByNameIgnoreCase(request.getName())) {
-            throw new ValidationException("Designation '" + request.getName() + "' already exists");
-        }
         Department department = departmentRepository.findById(request.getDepartmentId())
                 .orElseThrow(() -> new ResourceNotFoundException("Department", "id", request.getDepartmentId().toString()));
+
+        if (designationRepository.existsByNameIgnoreCaseAndDepartmentId(request.getName(), department.getId())) {
+            throw new ValidationException("Designation '" + request.getName() + "' already exists in this department");
+        }
 
         Designation designation = designationMapper.toEntity(request);
         designation.setDepartment(department);
@@ -63,13 +64,15 @@ public class DesignationServiceImpl implements DesignationService {
     public DesignationResponse update(UUID id, DesignationRequest request) {
         Designation designation = findOrThrow(id);
 
-        boolean nameChanged = !designation.getName().equalsIgnoreCase(request.getName());
-        if (nameChanged && designationRepository.existsByNameIgnoreCase(request.getName())) {
-            throw new ValidationException("Designation '" + request.getName() + "' already exists");
-        }
-
         Department department = departmentRepository.findById(request.getDepartmentId())
                 .orElseThrow(() -> new ResourceNotFoundException("Department", "id", request.getDepartmentId().toString()));
+
+        boolean nameOrDeptChanged = !designation.getName().equalsIgnoreCase(request.getName())
+                || !department.getId().equals(designation.getDepartment() == null ? null : designation.getDepartment().getId());
+        if (nameOrDeptChanged && designationRepository.existsByNameIgnoreCaseAndDepartmentIdAndIdNot(
+                request.getName(), department.getId(), id)) {
+            throw new ValidationException("Designation '" + request.getName() + "' already exists in this department");
+        }
 
         designationMapper.updateEntity(designation, request);
         designation.setDepartment(department);
