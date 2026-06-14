@@ -21,7 +21,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -146,7 +148,8 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
     @Override
     @Transactional(readOnly = true)
     public List<LeaveRequestResponse> getPendingApprovalsForHrAdmin() {
-        return leaveApprovalRepository.findPendingLeaveRequestsForHrAdminRole()
+        var pageable = PageRequest.of(0, 500, Sort.by("appliedAt").descending());
+        return leaveRequestRepository.findByStatus(LeaveRequestStatus.PENDING, pageable)
                 .stream()
                 .map(leaveMapper::toRequestResponse)
                 .toList();
@@ -161,55 +164,60 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         }
 
         int currentLevel = leaveRequest.getCurrentApprovalLevel();
-        LeaveApproval approval = leaveApprovalRepository
-                .findByLeaveRequestIdAndApproverLevel(requestId, currentLevel)
-                .orElseThrow(() -> new AppException(
-                        "No approval record found for level " + currentLevel,
-                        HttpStatus.NOT_FOUND, "APPROVAL_NOT_FOUND"));
+        var approvalOpt = leaveApprovalRepository
+                .findByLeaveRequestIdAndApproverLevel(requestId, currentLevel);
 
-        // null approverId means HR Admin override — any HR Admin can approve any level
-        if (approverId != null && !approval.getApprover().getId().equals(approverId)) {
+        if (approvalOpt.isPresent()) {
+            LeaveApproval approval = approvalOpt.get();
+            // null approverId means HR Admin override — any HR Admin can approve any level
+            if (approverId != null && !approval.getApprover().getId().equals(approverId)) {
+                throw new AppException(
+                        "You are not authorized to approve this request at the current level",
+                        HttpStatus.FORBIDDEN, "NOT_AUTHORIZED_APPROVER");
+            }
+            if (approval.getStatus() != LeaveApprovalStatus.PENDING) {
+                throw new ValidationException("This approval step has already been acted upon");
+            }
+            approval.setStatus(LeaveApprovalStatus.APPROVED);
+            approval.setAction(LeaveApprovalAction.APPROVED);
+            approval.setActedAt(Instant.now());
+            approval.setComments(req != null ? req.getComments() : null);
+            leaveApprovalRepository.save(approval);
+
+            int nextLevel = currentLevel + 1;
+            boolean hasNextLevel = leaveApprovalRepository
+                    .findByLeaveRequestIdAndApproverLevel(requestId, nextLevel).isPresent();
+            if (hasNextLevel) {
+                leaveRequest.setCurrentApprovalLevel(nextLevel);
+                leaveRequest = leaveRequestRepository.save(leaveRequest);
+                log.info("Leave request {} forwarded to approval level {}", requestId, nextLevel);
+                return leaveMapper.toRequestResponse(leaveRequest);
+            }
+        } else if (approverId != null) {
+            // No chain record exists and acting user is not HR Admin — reject
             throw new AppException(
-                    "You are not authorized to approve this request at the current level",
-                    HttpStatus.FORBIDDEN, "NOT_AUTHORIZED_APPROVER");
+                    "No approval record found for level " + currentLevel,
+                    HttpStatus.NOT_FOUND, "APPROVAL_NOT_FOUND");
         }
-        if (approval.getStatus() != LeaveApprovalStatus.PENDING) {
-            throw new ValidationException("This approval step has already been acted upon");
-        }
+        // Either the chain is complete OR HR Admin is approving a request with no chain records
 
-        approval.setStatus(LeaveApprovalStatus.APPROVED);
-        approval.setAction(LeaveApprovalAction.APPROVED);
-        approval.setActedAt(Instant.now());
-        approval.setComments(req != null ? req.getComments() : null);
-        leaveApprovalRepository.save(approval);
+        int year = leaveRequest.getStartDate().getYear();
+        LeaveBalance balance = leaveBalanceRepository
+                .findByEmployeeIdAndLeaveTypeIdAndYear(
+                        leaveRequest.getEmployee().getId(), leaveRequest.getLeaveType().getId(), year)
+                .orElseThrow(() -> new ValidationException("Leave balance record not found"));
+        balance.setPendingDays(balance.getPendingDays().subtract(leaveRequest.getTotalDays()));
+        balance.setUsedDays(balance.getUsedDays().add(leaveRequest.getTotalDays()));
+        leaveBalanceRepository.save(balance);
 
-        int nextLevel = leaveRequest.getCurrentApprovalLevel() + 1;
-        boolean hasNextLevel = leaveApprovalRepository
-                .findByLeaveRequestIdAndApproverLevel(requestId, nextLevel).isPresent();
+        leaveRequest.setStatus(LeaveRequestStatus.APPROVED);
+        leaveRequest = leaveRequestRepository.save(leaveRequest);
 
-        if (hasNextLevel) {
-            leaveRequest.setCurrentApprovalLevel(nextLevel);
-            leaveRequest = leaveRequestRepository.save(leaveRequest);
-            log.info("Leave request {} forwarded to approval level {}", requestId, nextLevel);
-        } else {
-            int year = leaveRequest.getStartDate().getYear();
-            LeaveBalance balance = leaveBalanceRepository
-                    .findByEmployeeIdAndLeaveTypeIdAndYear(
-                            leaveRequest.getEmployee().getId(), leaveRequest.getLeaveType().getId(), year)
-                    .orElseThrow(() -> new ValidationException("Leave balance record not found"));
-            balance.setPendingDays(balance.getPendingDays().subtract(leaveRequest.getTotalDays()));
-            balance.setUsedDays(balance.getUsedDays().add(leaveRequest.getTotalDays()));
-            leaveBalanceRepository.save(balance);
-
-            leaveRequest.setStatus(LeaveRequestStatus.APPROVED);
-            leaveRequest = leaveRequestRepository.save(leaveRequest);
-
-            eventPublisher.publishEvent(new LeaveApprovedEvent(
-                    leaveRequest.getEmployee().getId(),
-                    leaveRequest.getStartDate(),
-                    leaveRequest.getEndDate()));
-            log.info("Leave request {} fully approved", requestId);
-        }
+        eventPublisher.publishEvent(new LeaveApprovedEvent(
+                leaveRequest.getEmployee().getId(),
+                leaveRequest.getStartDate(),
+                leaveRequest.getEndDate()));
+        log.info("Leave request {} fully approved", requestId);
 
         return leaveMapper.toRequestResponse(leaveRequest);
     }
@@ -223,27 +231,31 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         }
 
         int currentLevel = leaveRequest.getCurrentApprovalLevel();
-        LeaveApproval approval = leaveApprovalRepository
-                .findByLeaveRequestIdAndApproverLevel(requestId, currentLevel)
-                .orElseThrow(() -> new AppException(
-                        "No approval record found for level " + currentLevel,
-                        HttpStatus.NOT_FOUND, "APPROVAL_NOT_FOUND"));
+        var approvalOpt = leaveApprovalRepository
+                .findByLeaveRequestIdAndApproverLevel(requestId, currentLevel);
 
-        // null approverId means HR Admin override — any HR Admin can reject any level
-        if (approverId != null && !approval.getApprover().getId().equals(approverId)) {
+        if (approvalOpt.isPresent()) {
+            LeaveApproval approval = approvalOpt.get();
+            // null approverId means HR Admin override — any HR Admin can reject any level
+            if (approverId != null && !approval.getApprover().getId().equals(approverId)) {
+                throw new AppException(
+                        "You are not authorized to reject this request at the current level",
+                        HttpStatus.FORBIDDEN, "NOT_AUTHORIZED_APPROVER");
+            }
+            if (approval.getStatus() != LeaveApprovalStatus.PENDING) {
+                throw new ValidationException("This approval step has already been acted upon");
+            }
+            approval.setStatus(LeaveApprovalStatus.REJECTED);
+            approval.setAction(LeaveApprovalAction.REJECTED);
+            approval.setActedAt(Instant.now());
+            approval.setComments(req != null ? req.getComments() : null);
+            leaveApprovalRepository.save(approval);
+        } else if (approverId != null) {
             throw new AppException(
-                    "You are not authorized to reject this request at the current level",
-                    HttpStatus.FORBIDDEN, "NOT_AUTHORIZED_APPROVER");
+                    "No approval record found for level " + currentLevel,
+                    HttpStatus.NOT_FOUND, "APPROVAL_NOT_FOUND");
         }
-        if (approval.getStatus() != LeaveApprovalStatus.PENDING) {
-            throw new ValidationException("This approval step has already been acted upon");
-        }
-
-        approval.setStatus(LeaveApprovalStatus.REJECTED);
-        approval.setAction(LeaveApprovalAction.REJECTED);
-        approval.setActedAt(Instant.now());
-        approval.setComments(req != null ? req.getComments() : null);
-        leaveApprovalRepository.save(approval);
+        // HR Admin rejecting a request with no chain records — proceed directly
 
         int year = leaveRequest.getStartDate().getYear();
         LeaveBalance balance = leaveBalanceRepository

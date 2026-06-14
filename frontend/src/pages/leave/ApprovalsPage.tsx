@@ -76,7 +76,8 @@ function RejectDialog({ open, requestId, onClose, onSuccess }: RejectDialogProps
 
 export default function ApprovalsPage() {
   const user = useAuthStore((s) => s.user)
-  const hasEmployeeLink = Boolean(user?.id)
+  const isHrAdmin = user?.roles?.includes("ROLE_HR_ADMIN") ?? false
+  const hasEmployeeLink = Boolean(user?.id) || isHrAdmin
 
   const [requests, setRequests]   = useState<LeaveRequest[]>([])
   const [loading, setLoading]     = useState(false)
