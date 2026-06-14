@@ -34,7 +34,6 @@ Each sub-project has its own README with detailed setup instructions:
 | Language | Java 21 | TypeScript 5.6 |
 | Framework | Spring Boot 3.2.5 | React 18 + Vite 5 |
 | Database | PostgreSQL + Flyway | — |
-| Cache | Redis | — |
 | Auth | Spring Security 6 + JWT | Zustand |
 | UI | — | Radix UI + Tailwind CSS |
 | API Docs | Swagger UI | — |
@@ -54,7 +53,6 @@ Each sub-project has its own README with detailed setup instructions:
 - Java 21+
 - Node.js 18+
 - PostgreSQL 14+ (database: `hrms_db`)
-- Redis 7+
 
 ### 1. Start the backend
 

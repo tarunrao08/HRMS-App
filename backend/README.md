@@ -12,7 +12,6 @@ Human Resource Management System — REST API built with Spring Boot 3.2.5 and J
 | Database | PostgreSQL |
 | ORM | Spring Data JPA + Hibernate |
 | Migrations | Flyway 10 |
-| Cache | Redis |
 | Scheduler | Quartz |
 | Mapping | MapStruct 1.5.5 |
 | PDF Generation | iText 8 (AGPL) |
@@ -36,7 +35,6 @@ Human Resource Management System — REST API built with Spring Boot 3.2.5 and J
 
 - Java 21+
 - PostgreSQL 14+
-- Redis 7+
 - Maven 3.9+ (or use the wrapper inside IntelliJ)
 
 ## Database Setup
@@ -67,11 +65,6 @@ spring:
     url: jdbc:postgresql://localhost:5432/hrms_db
     username: postgres
     password: postgres
-
-  data:
-    redis:
-      host: localhost
-      port: 6379
 
 app:
   jwt:
