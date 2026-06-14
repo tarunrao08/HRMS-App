@@ -147,6 +147,15 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
 
     @Override
     @Transactional(readOnly = true)
+    public List<LeaveRequestResponse> getPendingForManager(UUID managerId) {
+        return leaveRequestRepository.findPendingForManager(managerId)
+                .stream()
+                .map(leaveMapper::toRequestResponse)
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public List<LeaveRequestResponse> getPendingApprovalsForHrAdmin() {
         var pageable = PageRequest.of(0, 500, Sort.by("appliedAt").descending());
         return leaveRequestRepository.findByStatus(LeaveRequestStatus.PENDING, pageable)
@@ -194,12 +203,16 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
                 return leaveMapper.toRequestResponse(leaveRequest);
             }
         } else if (approverId != null) {
-            // No chain record exists and acting user is not HR Admin — reject
-            throw new AppException(
-                    "No approval record found for level " + currentLevel,
-                    HttpStatus.NOT_FOUND, "APPROVAL_NOT_FOUND");
+            // No chain record — allow if this user is the employee's direct manager
+            Employee directManager = leaveRequest.getEmployee().getManager();
+            if (directManager == null || !directManager.getId().equals(approverId)) {
+                throw new AppException(
+                        "You are not authorized to approve this request",
+                        HttpStatus.FORBIDDEN, "NOT_AUTHORIZED_APPROVER");
+            }
+            // Direct manager acting on a request with no chain records — fall through to finalize
         }
-        // Either the chain is complete OR HR Admin is approving a request with no chain records
+        // Chain complete, HR Admin override, or manager acting on chain-less request
 
         int year = leaveRequest.getStartDate().getYear();
         LeaveBalance balance = leaveBalanceRepository
@@ -251,11 +264,16 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
             approval.setComments(req != null ? req.getComments() : null);
             leaveApprovalRepository.save(approval);
         } else if (approverId != null) {
-            throw new AppException(
-                    "No approval record found for level " + currentLevel,
-                    HttpStatus.NOT_FOUND, "APPROVAL_NOT_FOUND");
+            // No chain record — allow if this user is the employee's direct manager
+            Employee directManager = leaveRequest.getEmployee().getManager();
+            if (directManager == null || !directManager.getId().equals(approverId)) {
+                throw new AppException(
+                        "You are not authorized to reject this request",
+                        HttpStatus.FORBIDDEN, "NOT_AUTHORIZED_APPROVER");
+            }
+            // Direct manager acting on a request with no chain records — fall through
         }
-        // HR Admin rejecting a request with no chain records — proceed directly
+        // HR Admin or manager rejecting a request with no chain records
 
         int year = leaveRequest.getStartDate().getYear();
         LeaveBalance balance = leaveBalanceRepository

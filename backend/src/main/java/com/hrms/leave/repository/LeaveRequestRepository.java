@@ -25,6 +25,27 @@ public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, UUID
 
     Page<LeaveRequest> findByStatus(LeaveRequestStatus status, Pageable pageable);
 
+    @Query("""
+            SELECT lr FROM LeaveRequest lr
+            WHERE lr.status = com.hrms.leave.enums.LeaveRequestStatus.PENDING
+              AND lr.employee.manager.id = :managerId
+              AND (
+                  EXISTS (
+                      SELECT 1 FROM LeaveApproval la
+                      WHERE la.leaveRequest.id = lr.id
+                        AND la.approver.id = :managerId
+                        AND la.approverLevel = lr.currentApprovalLevel
+                        AND la.status = com.hrms.leave.enums.LeaveApprovalStatus.PENDING
+                  )
+                  OR NOT EXISTS (
+                      SELECT 1 FROM LeaveApproval la
+                      WHERE la.leaveRequest.id = lr.id
+                  )
+              )
+            ORDER BY lr.appliedAt ASC
+            """)
+    List<LeaveRequest> findPendingForManager(@Param("managerId") UUID managerId);
+
     // Used to detect overlapping approved/pending leaves before applying a new request
     @Query("""
             SELECT lr FROM LeaveRequest lr

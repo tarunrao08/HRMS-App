@@ -20,9 +20,9 @@ Each sub-project has its own README with detailed setup instructions:
 | Module | Description |
 |---|---|
 | Authentication | JWT-based login, token refresh, role-based access control |
-| Employees | Employee profiles, departments, designations, branches |
+| Employees | Employee profiles, departments, designations, branches, reporting manager assignment |
 | Attendance | Punch-in/out, shift management, monthly summaries |
-| Leave | Leave applications, multi-level approvals, balance tracking |
+| Leave | Leave applications, 2-level approvals (manager → HR Admin), balance tracking |
 | Payroll | CTC assignment, payslip generation, PDF download |
 | Onboarding | Workflow templates, task checklists for new joiners |
 | HR Assistant | Rule-based chatbot for employee and HR admin queries |
@@ -44,7 +44,7 @@ Each sub-project has its own README with detailed setup instructions:
 | Role | Access |
 |---|---|
 | `ROLE_HR_ADMIN` | Full access — all modules |
-| `ROLE_MANAGER` | Employees, payroll, leave approvals |
+| `ROLE_MANAGER` | Employees, payroll, leave approvals for direct reports |
 | `ROLE_EMPLOYEE` | Own dashboard, attendance, leave, payslips |
 
 ## Quick Start
@@ -77,6 +77,16 @@ npm run dev
 ```
 
 Open **http://localhost:5173** in your browser.
+
+### 3. Configure reporting managers
+
+For leave approvals to route correctly, each employee must have a **Reporting Manager** assigned:
+
+1. Log in as HR Admin → go to **Employee Management**
+2. Edit each employee → set the **Reporting Manager** dropdown
+3. Save — leave requests from that employee will now appear in the manager's **Pending Approvals** page
+
+> Leave approval chain: employee requests go to their **department manager (L1)** then **HR Admin (L2)**. Manager requests go directly to **HR Admin**.
 
 ## Screenshots
 

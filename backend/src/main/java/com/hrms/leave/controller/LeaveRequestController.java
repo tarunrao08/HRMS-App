@@ -74,8 +74,8 @@ public class LeaveRequestController {
             return ResponseEntity.ok(ApiResponse.success(
                     leaveRequestService.getPendingApprovalsForHrAdmin()));
         }
-        UUID approverId = resolveEmployeeId(userDetails);
-        return ResponseEntity.ok(ApiResponse.success(leaveRequestService.getPendingApprovals(approverId)));
+        UUID managerId = resolveEmployeeId(userDetails);
+        return ResponseEntity.ok(ApiResponse.success(leaveRequestService.getPendingForManager(managerId)));
     }
 
     @PatchMapping("/{id}/approve")

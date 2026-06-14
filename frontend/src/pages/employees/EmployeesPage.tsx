@@ -47,6 +47,7 @@ interface FormState {
   departmentId: string
   designationId: string
   branchId: string
+  managerId: string
   joiningDate: string
   employmentType: EmploymentType | ""
   employmentStatus: EmploymentStatus | ""
@@ -61,6 +62,7 @@ const EMPTY_FORM: FormState = {
   departmentId: "",
   designationId: "",
   branchId: "",
+  managerId: "",
   joiningDate: "",
   employmentType: "",
   employmentStatus: "",
@@ -104,6 +106,7 @@ export default function EmployeesPage() {
   const [departments, setDepartments]   = useState<DepartmentResponse[]>([])
   const [designations, setDesignations] = useState<DesignationResponse[]>([])
   const [branches, setBranches]         = useState<BranchResponse[]>([])
+  const [empSummaries, setEmpSummaries] = useState<{ id: string; employeeCode: string; fullName: string }[]>([])
 
   // Dialog state
   const [dialogOpen, setDialogOpen]         = useState(false)
@@ -168,6 +171,11 @@ export default function EmployeesPage() {
       const data = (r.data as any).data ?? r.data
       setBranches(Array.isArray(data) ? data : [])
     }).catch(() => setBranches([]))
+
+    employeeService.getSummaries().then((r) => {
+      const data = (r.data as any).data ?? r.data
+      setEmpSummaries(Array.isArray(data) ? data : [])
+    }).catch(() => setEmpSummaries([]))
   }, [])
 
   // Load designations when dialog dept changes
@@ -201,6 +209,7 @@ export default function EmployeesPage() {
       departmentId:     emp.departmentId,
       designationId:    emp.designationId,
       branchId:         emp.branchId,
+      managerId:        emp.managerId ?? "",
       joiningDate:      emp.joiningDate,
       employmentType:   (emp.employmentType as EmploymentType) || "",
       employmentStatus: (emp.employmentStatus as EmploymentStatus) || "",
@@ -230,6 +239,7 @@ export default function EmployeesPage() {
       departmentId:     form.departmentId,
       designationId:    form.designationId,
       branchId:         form.branchId,
+      managerId:        form.managerId || undefined,
       joiningDate:      form.joiningDate,
       employmentType:   form.employmentType as string,
       employmentStatus: form.employmentStatus as string,
@@ -520,23 +530,46 @@ export default function EmployeesPage() {
               </div>
             </div>
 
-            {/* Branch */}
-            <div className="space-y-1">
-              <Label>Branch <span className="text-destructive">*</span></Label>
-              <Select
-                value={form.branchId}
-                onValueChange={(v) => setField("branchId", v)}
-                required
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select branch" />
-                </SelectTrigger>
-                <SelectContent>
-                  {branches.map((b) => (
-                    <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            {/* Row: Branch / Reporting Manager */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <Label>Branch <span className="text-destructive">*</span></Label>
+                <Select
+                  value={form.branchId}
+                  onValueChange={(v) => setField("branchId", v)}
+                  required
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select branch" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {branches.map((b) => (
+                      <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label>Reporting Manager</Label>
+                <Select
+                  value={form.managerId}
+                  onValueChange={(v) => setField("managerId", v === "__none__" ? "" : v)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="No manager" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">No manager</SelectItem>
+                    {empSummaries
+                      .filter((e) => !editTarget || e.id !== editTarget.id)
+                      .map((e) => (
+                        <SelectItem key={e.id} value={e.id}>
+                          {e.fullName} ({e.employeeCode})
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             {/* Row: Joining Date / Gender */}

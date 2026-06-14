@@ -13,6 +13,7 @@ export interface EmployeeRequest {
   employmentType: string
   employmentStatus: string
   gender: string
+  managerId?: string
   dateOfBirth?: string
   address?: string
   emergencyContactName?: string
