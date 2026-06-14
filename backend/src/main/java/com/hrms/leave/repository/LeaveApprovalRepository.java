@@ -28,4 +28,18 @@ public interface LeaveApprovalRepository extends JpaRepository<LeaveApproval, UU
             ORDER BY la.leaveRequest.appliedAt ASC
             """)
     List<LeaveRequest> findPendingLeaveRequestsForApprover(@Param("approverId") UUID approverId);
+
+    @Query("""
+            SELECT la.leaveRequest FROM LeaveApproval la
+            WHERE la.status = com.hrms.leave.enums.LeaveApprovalStatus.PENDING
+              AND la.approverLevel = la.leaveRequest.currentApprovalLevel
+              AND la.leaveRequest.status = com.hrms.leave.enums.LeaveRequestStatus.PENDING
+              AND EXISTS (
+                  SELECT 1 FROM User u JOIN u.roles r
+                  WHERE u.employeeId = la.approver.id
+                    AND r.name = 'ROLE_HR_ADMIN'
+              )
+            ORDER BY la.leaveRequest.appliedAt ASC
+            """)
+    List<LeaveRequest> findPendingLeaveRequestsForHrAdminRole();
 }

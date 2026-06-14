@@ -70,6 +70,10 @@ public class LeaveRequestController {
     @Operation(summary = "Get leave requests pending the current user's approval")
     public ResponseEntity<ApiResponse<List<LeaveRequestResponse>>> getPendingApprovals(
             @AuthenticationPrincipal UserDetails userDetails) {
+        if (isHrAdmin(userDetails)) {
+            return ResponseEntity.ok(ApiResponse.success(
+                    leaveRequestService.getPendingApprovalsForHrAdmin()));
+        }
         UUID approverId = resolveEmployeeId(userDetails);
         return ResponseEntity.ok(ApiResponse.success(leaveRequestService.getPendingApprovals(approverId)));
     }
@@ -81,7 +85,8 @@ public class LeaveRequestController {
             @PathVariable UUID id,
             @AuthenticationPrincipal UserDetails userDetails,
             @RequestBody(required = false) ApproveRejectRequest request) {
-        UUID approverId = resolveEmployeeId(userDetails);
+        // null approverId for HR Admin — service will skip the identity check
+        UUID approverId = isHrAdmin(userDetails) ? null : resolveEmployeeId(userDetails);
         return ResponseEntity.ok(ApiResponse.success("Leave request approved",
                 leaveRequestService.approve(id, approverId, request)));
     }
@@ -93,7 +98,8 @@ public class LeaveRequestController {
             @PathVariable UUID id,
             @AuthenticationPrincipal UserDetails userDetails,
             @RequestBody(required = false) ApproveRejectRequest request) {
-        UUID approverId = resolveEmployeeId(userDetails);
+        // null approverId for HR Admin — service will skip the identity check
+        UUID approverId = isHrAdmin(userDetails) ? null : resolveEmployeeId(userDetails);
         return ResponseEntity.ok(ApiResponse.success("Leave request rejected",
                 leaveRequestService.reject(id, approverId, request)));
     }
@@ -125,6 +131,11 @@ public class LeaveRequestController {
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private boolean isHrAdmin(UserDetails userDetails) {
+        return userDetails.getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals("ROLE_HR_ADMIN"));
+    }
 
     private UUID resolveEmployeeId(UserDetails userDetails) {
         return userRepository.findByUsername(userDetails.getUsername())

@@ -144,6 +144,15 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public List<LeaveRequestResponse> getPendingApprovalsForHrAdmin() {
+        return leaveApprovalRepository.findPendingLeaveRequestsForHrAdminRole()
+                .stream()
+                .map(leaveMapper::toRequestResponse)
+                .toList();
+    }
+
+    @Override
     @Transactional
     public LeaveRequestResponse approve(UUID requestId, UUID approverId, ApproveRejectRequest req) {
         LeaveRequest leaveRequest = findRequestOrThrow(requestId);
@@ -158,7 +167,8 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
                         "No approval record found for level " + currentLevel,
                         HttpStatus.NOT_FOUND, "APPROVAL_NOT_FOUND"));
 
-        if (!approval.getApprover().getId().equals(approverId)) {
+        // null approverId means HR Admin override — any HR Admin can approve any level
+        if (approverId != null && !approval.getApprover().getId().equals(approverId)) {
             throw new AppException(
                     "You are not authorized to approve this request at the current level",
                     HttpStatus.FORBIDDEN, "NOT_AUTHORIZED_APPROVER");
@@ -219,7 +229,8 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
                         "No approval record found for level " + currentLevel,
                         HttpStatus.NOT_FOUND, "APPROVAL_NOT_FOUND"));
 
-        if (!approval.getApprover().getId().equals(approverId)) {
+        // null approverId means HR Admin override — any HR Admin can reject any level
+        if (approverId != null && !approval.getApprover().getId().equals(approverId)) {
             throw new AppException(
                     "You are not authorized to reject this request at the current level",
                     HttpStatus.FORBIDDEN, "NOT_AUTHORIZED_APPROVER");

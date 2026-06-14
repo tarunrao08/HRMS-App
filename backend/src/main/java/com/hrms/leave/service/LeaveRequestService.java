@@ -16,6 +16,8 @@ public interface LeaveRequestService {
 
     List<LeaveRequestResponse> getPendingApprovals(UUID approverId);
 
+    List<LeaveRequestResponse> getPendingApprovalsForHrAdmin();
+
     LeaveRequestResponse approve(UUID requestId, UUID approverId, ApproveRejectRequest request);
 
     LeaveRequestResponse reject(UUID requestId, UUID approverId, ApproveRejectRequest request);
