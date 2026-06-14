@@ -1,0 +1,60 @@
+# ── Build output ──────────────────────────────────────────────────────────────
+target/
+build/
+!**/src/main/**/target/
+!**/src/test/**/target/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+# ── Maven wrapper (keep the jar so the repo is self-contained) ────────────────
+!.mvn/wrapper/maven-wrapper.jar
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+logs/
+*.log
+*.log.*
+
+# ── Secrets & environment ─────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+application-prod.yml
+application-prod.properties
+application-staging.yml
+application-staging.properties
+
+# ── Runtime uploads & generated files ────────────────────────────────────────
+uploads/
+hrms-payslips/
+
+# ── IntelliJ IDEA ─────────────────────────────────────────────────────────────
+.idea/
+*.iws
+*.iml
+*.ipr
+
+# ── Eclipse ───────────────────────────────────────────────────────────────────
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings/
+.springBeans
+.sts4-cache
+
+# ── NetBeans ──────────────────────────────────────────────────────────────────
+/nbproject/private/
+/nbbuild/
+/nbdist/
+/.nb-gradle/
+
+# ── VS Code ───────────────────────────────────────────────────────────────────
+.vscode/
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Kotlin (Spring Boot tooling) ──────────────────────────────────────────────
+.kotlin/

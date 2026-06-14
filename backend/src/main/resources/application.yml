@@ -1,0 +1,159 @@
+spring:
+  application:
+    name: hrms-backend
+  profiles:
+    active: dev
+
+  # ── Quartz Scheduler ─────────────────────────────────────────────────────
+  quartz:
+    job-store-type: memory
+    overwrite-existing-jobs: true
+    properties:
+      org.quartz.threadPool.threadCount: 2
+
+  # ── DataSource + HikariCP ──────────────────────────────────────────────────
+  datasource:
+    url: jdbc:postgresql://localhost:5432/hrms_db
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      pool-name: HrmsHikariPool
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      connection-test-query: SELECT 1
+      leak-detection-threshold: 60000
+
+  # ── JPA / Hibernate ───────────────────────────────────────────────────────
+  jpa:
+    hibernate:
+      ddl-auto: validate          # Flyway owns the schema; Hibernate must never modify it
+    show-sql: false
+    open-in-view: false           # Prevent accidental lazy-loading in the web layer
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+        jdbc:
+          time_zone: UTC
+        order_inserts: true
+        order_updates: true
+        batch_size: 25
+
+  # ── Flyway ────────────────────────────────────────────────────────────────
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    validate-on-migrate: true
+    out-of-order: false
+    table: flyway_schema_history
+
+  # ── Redis ─────────────────────────────────────────────────────────────────
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+          max-wait: -1ms
+
+  # ── Multipart ─────────────────────────────────────────────────────────────
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 20MB
+
+  # ── Jackson ───────────────────────────────────────────────────────────────
+  jackson:
+    time-zone: UTC
+    serialization:
+      write-dates-as-timestamps: false
+    deserialization:
+      fail-on-unknown-properties: false
+    default-property-inclusion: NON_NULL
+
+# ── Server ────────────────────────────────────────────────────────────────
+server:
+  port: 8080
+  servlet:
+    context-path: /
+  error:
+    include-message: never       # Never leak exception messages to the client
+    include-stacktrace: never
+
+# ── App-level configuration ───────────────────────────────────────────────
+app:
+  jwt:
+    # 64-byte hex string — replace with a secure random value in production
+    secret: 404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970
+    expiration: 86400000          # 24 h in ms
+    refresh-expiration: 604800000 # 7 days in ms
+    token-prefix: Bearer
+    header: Authorization
+
+  upload:
+    dir: uploads
+
+  cors:
+    allowed-origins: "http://localhost:5173,http://localhost:3000"
+    allowed-methods: "GET,POST,PUT,DELETE,PATCH,OPTIONS"
+    allowed-headers: "*"
+    allow-credentials: true
+    max-age: 3600
+
+# ── SpringDoc / Swagger ───────────────────────────────────────────────────
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+    display-request-duration: true
+  show-actuator: false
+
+# ── Actuator ─────────────────────────────────────────────────────────────
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+  info:
+    env:
+      enabled: true
+
+# ── Payroll ───────────────────────────────────────────────────────────────
+payroll:
+  pdf:
+    base-dir: ${user.home}/hrms-payslips
+
+# ── Leave Module ──────────────────────────────────────────────────────────
+leave:
+  rollover:
+    cron: "0 5 0 1 1 ?"   # Jan 1 at 00:05 (Quartz format: s m h dom mon dow)
+
+# ── Logging ───────────────────────────────────────────────────────────────
+logging:
+  level:
+    root: INFO
+    com.hrms: DEBUG
+    org.springframework.security: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+    org.flywaydb: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{40} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{40} - %msg%n"
+  file:
+    name: logs/hrms-backend.log
