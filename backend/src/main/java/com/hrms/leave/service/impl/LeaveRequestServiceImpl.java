@@ -116,7 +116,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
                 .build();
         leaveRequest = leaveRequestRepository.save(leaveRequest);
 
-        List<Employee> chain = buildApprovalChain(employee, leaveType, totalDays);
+        List<Employee> chain = buildApprovalChain(employee);
         for (int i = 0; i < chain.size(); i++) {
             LeaveApproval approval = LeaveApproval.builder()
                     .leaveRequest(leaveRequest)
@@ -329,28 +329,31 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         return BigDecimal.valueOf(count);
     }
 
-    private List<Employee> buildApprovalChain(Employee employee, LeaveType leaveType, BigDecimal totalDays) {
-        boolean twoLevels = "EL".equals(leaveType.getCode())
-                || totalDays.compareTo(BigDecimal.valueOf(5)) > 0;
+    private List<Employee> buildApprovalChain(Employee employee) {
+        Employee hrAdmin = resolveHrAdminEmployee();
 
-        List<Employee> chain = new ArrayList<>();
-        Employee level1 = resolveFirstApprover(employee);
-        chain.add(level1);
+        // Managers and HR Admins go directly to HR Admin for approval
+        boolean isManagerOrAbove = userRepository.findByEmployeeId(employee.getId())
+                .map(u -> u.getRoles().stream()
+                        .anyMatch(r -> "ROLE_MANAGER".equals(r.getName())
+                                || "ROLE_HR_ADMIN".equals(r.getName())))
+                .orElse(false);
 
-        if (twoLevels) {
-            Employee level2 = (level1.getManager() != null)
-                    ? level1.getManager()
-                    : resolveHrAdminEmployee();
-            if (!level2.getId().equals(level1.getId())) {
-                chain.add(level2);
-            }
+        if (isManagerOrAbove) {
+            return List.of(hrAdmin);
         }
 
-        return chain;
-    }
-
-    private Employee resolveFirstApprover(Employee employee) {
-        return employee.getManager() != null ? employee.getManager() : resolveHrAdminEmployee();
+        // Regular employees: department manager (L1) → HR Admin (L2)
+        Employee manager = employee.getManager();
+        if (manager == null) {
+            // No manager assigned — escalate directly to HR Admin
+            return List.of(hrAdmin);
+        }
+        // Avoid duplicate if the employee's manager is the HR Admin
+        if (manager.getId().equals(hrAdmin.getId())) {
+            return List.of(hrAdmin);
+        }
+        return List.of(manager, hrAdmin);
     }
 
     private Employee resolveHrAdminEmployee() {
