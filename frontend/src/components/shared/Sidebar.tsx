@@ -41,8 +41,8 @@ const hrNav: NavItemDef[] = [
   { icon: CalendarDays,  label: "My Leave",     to: "/leave" },
   { icon: CalendarCheck, label: "Approvals",    to: "/leave/approvals", roles: ["ROLE_HR_ADMIN", "ROLE_MANAGER"] },
   { icon: CalendarRange, label: "Leave Admin",  to: "/leave/admin",     roles: ["ROLE_HR_ADMIN"] },
-  { icon: DollarSign,    label: "Payroll",      to: "/payroll",         roles: ["ROLE_HR_ADMIN", "ROLE_MANAGER"] },
-  { icon: ClipboardList, label: "Onboarding",   to: "/onboarding",      roles: ["ROLE_HR_ADMIN", "ROLE_MANAGER"] },
+  { icon: DollarSign,    label: "Payroll",      to: "/payroll",    roles: ["ROLE_HR_ADMIN"] },
+  { icon: ClipboardList, label: "Onboarding",   to: "/onboarding", roles: ["ROLE_HR_ADMIN", "ROLE_MANAGER", "ROLE_EMPLOYEE"] },
 ]
 
 function useVisibleItems(items: NavItemDef[], userRoles: string[]): NavItemDef[] {

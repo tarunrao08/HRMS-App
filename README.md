@@ -43,7 +43,7 @@ Each sub-project has its own README with detailed setup instructions:
 | Role | Access |
 |---|---|
 | `ROLE_HR_ADMIN` | Full access — all modules |
-| `ROLE_MANAGER` | Employees, payroll, leave approvals for direct reports |
+| `ROLE_MANAGER` | Employees, leave approvals for direct reports, own onboarding checklist |
 | `ROLE_EMPLOYEE` | Own dashboard, attendance, leave, payslips |
 
 ## Quick Start

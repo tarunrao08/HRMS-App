@@ -57,7 +57,6 @@ export default function App() {
         <Route element={<ProtectedRoute allowedRoles={MANAGER_AND_ABOVE} />}>
           <Route element={<AppLayout />}>
             <Route path="/employees"        element={<EmployeesPage />} />
-            <Route path="/payroll"          element={<PayrollPage />} />
             <Route path="/leave/approvals"  element={<ApprovalsPage />} />
           </Route>
         </Route>
@@ -65,6 +64,7 @@ export default function App() {
         {/* HR Admin only */}
         <Route element={<ProtectedRoute allowedRoles={HR_ADMIN} />}>
           <Route element={<AppLayout />}>
+            <Route path="/payroll"      element={<PayrollPage />} />
             <Route path="/departments"  element={<DepartmentsPage />} />
             <Route path="/designations" element={<DesignationsPage />} />
             <Route path="/branches"     element={<BranchesPage />} />

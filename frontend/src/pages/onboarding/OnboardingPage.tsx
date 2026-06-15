@@ -40,7 +40,7 @@ import onboardingService, {
 import employeeService from "@/services/employeeService"
 import { toastApiError } from "@/services/api"
 import { useAuthStore } from "@/store/authStore"
-import { useIsManagerOrAbove } from "@/hooks/useRole"
+import { useIsHrAdmin } from "@/hooks/useRole"
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -722,6 +722,6 @@ function AdminOnboardingView() {
 // ─── Main OnboardingPage — routes by role ─────────────────────────────────────
 
 export default function OnboardingPage() {
-  const isManagerOrAbove = useIsManagerOrAbove()
-  return isManagerOrAbove ? <AdminOnboardingView /> : <EmployeeOnboardingView />
+  const isHrAdmin = useIsHrAdmin()
+  return isHrAdmin ? <AdminOnboardingView /> : <EmployeeOnboardingView />
 }
