@@ -120,7 +120,7 @@ public class PayslipController {
     @PreAuthorize("hasAnyRole('HR_ADMIN','MANAGER','EMPLOYEE')")
     @Operation(summary = "Download the generated PDF for a payslip")
     public ResponseEntity<Resource> downloadPdf(@PathVariable UUID id, Authentication authentication) {
-        Payslip payslip = payslipRepository.findById(id)
+        Payslip payslip = payslipRepository.findByIdWithEmployee(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Payslip", "id", id.toString()));
 
         // Non-admin users may only download their own payslips

@@ -19,6 +19,9 @@ public interface PayslipRepository extends JpaRepository<Payslip, UUID> {
 
     List<Payslip> findByPayrollRunId(UUID payrollRunId);
 
+    @Query("SELECT p FROM Payslip p JOIN FETCH p.employee WHERE p.id = :id")
+    Optional<Payslip> findByIdWithEmployee(@Param("id") UUID id);
+
     @Query(value = """
             SELECT p FROM Payslip p
             WHERE p.employee.id = :employeeId
