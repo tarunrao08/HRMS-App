@@ -1,11 +1,13 @@
-import React, { useEffect, useState } from "react"
+import React, { useEffect, useMemo, useState } from "react"
 import toast from "react-hot-toast"
-import { RefreshCw, CheckCircle2, XCircle, Clock } from "lucide-react"
+import { RefreshCw, CheckCircle2, XCircle, Lock } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   Table,
   TableHeader,
@@ -18,12 +20,15 @@ import PageHeader from "@/components/shared/PageHeader"
 import EmptyState from "@/components/shared/EmptyState"
 
 import attendanceService, { type TodayAttendanceRow } from "@/services/attendanceService"
+import departmentService, { type DepartmentResponse } from "@/services/departmentService"
+import shiftService, { type ShiftResponse } from "@/services/shiftService"
 import { toastApiError } from "@/services/api"
 import { useAuthStore } from "@/store/authStore"
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-type AttendanceStatus = "PRESENT" | "ABSENT" | "HALF_DAY"
+type AttendanceStatus = "PRESENT" | "ABSENT"
+const LOCKED_STATUSES = new Set(["ON_LEAVE", "HALF_DAY"])
 
 function statusBadge(status?: string) {
   switch (status) {
@@ -33,6 +38,8 @@ function statusBadge(status?: string) {
       return <Badge variant="destructive">Absent</Badge>
     case "HALF_DAY":
       return <Badge variant="warning">Half Day</Badge>
+    case "ON_LEAVE":
+      return <Badge variant="warning">On Leave</Badge>
     default:
       return <Badge variant="outline">Not Marked</Badge>
   }
@@ -54,6 +61,12 @@ export default function AttendancePage() {
   const [loading, setLoading] = useState(true)
   const [marking, setMarking] = useState<string | null>(null)
 
+  const [departments, setDepartments] = useState<DepartmentResponse[]>([])
+  const [shifts, setShifts]           = useState<ShiftResponse[]>([])
+  const [search, setSearch]                 = useState("")
+  const [departmentFilter, setDepartmentFilter] = useState("__all__")
+  const [shiftFilter, setShiftFilter]           = useState("__all__")
+
   const user      = useAuthStore((s) => s.user)
   const isHrAdmin = user?.roles?.includes("ROLE_HR_ADMIN") ?? false
 
@@ -71,6 +84,31 @@ export default function AttendancePage() {
   }
 
   useEffect(() => { loadToday() }, [])
+
+  useEffect(() => {
+    departmentService.getAll().then((r) => {
+      const data = (r.data as any).data ?? r.data
+      setDepartments(Array.isArray(data) ? data : [])
+    }).catch(() => setDepartments([]))
+
+    shiftService.getAll().then((r) => {
+      const data = (r.data as any).data ?? r.data
+      setShifts(Array.isArray(data) ? data : [])
+    }).catch(() => setShifts([]))
+  }, [])
+
+  const filteredRows = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return rows.filter((r) => {
+      if (departmentFilter !== "__all__" && r.departmentId !== departmentFilter) return false
+      if (shiftFilter !== "__all__" && r.shiftId !== shiftFilter) return false
+      if (q) {
+        const haystack = `${r.employeeName} ${r.email ?? ""} ${r.employeeCode}`.toLowerCase()
+        if (!haystack.includes(q)) return false
+      }
+      return true
+    })
+  }, [rows, search, departmentFilter, shiftFilter])
 
   async function handleMark(employeeId: string, status: AttendanceStatus) {
     setMarking(employeeId + status)
@@ -102,6 +140,50 @@ export default function AttendancePage() {
       />
 
       <Card>
+        <CardContent className="pt-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <Input
+              className="sm:max-w-xs"
+              placeholder="Search by name, email or code…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
+              <SelectTrigger className="sm:w-48">
+                <SelectValue placeholder="All Departments" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All Departments</SelectItem>
+                {departments.map((d) => (
+                  <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={shiftFilter} onValueChange={setShiftFilter}>
+              <SelectTrigger className="sm:w-48">
+                <SelectValue placeholder="All Shifts" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All Shifts</SelectItem>
+                {shifts.map((s) => (
+                  <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {(search || departmentFilter !== "__all__" || shiftFilter !== "__all__") && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => { setSearch(""); setDepartmentFilter("__all__"); setShiftFilter("__all__") }}
+              >
+                Clear
+              </Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
         <CardContent className="p-0">
           {loading ? (
             <div className="p-6 space-y-3">
@@ -109,10 +191,10 @@ export default function AttendancePage() {
                 <Skeleton key={i} className="h-10 w-full rounded" />
               ))}
             </div>
-          ) : rows.length === 0 ? (
+          ) : filteredRows.length === 0 ? (
             <EmptyState
-              title="No active employees"
-              description="There are no active employees to display."
+              title="No matching employees"
+              description="No employees match the selected filters."
             />
           ) : (
             <Table>
@@ -121,13 +203,15 @@ export default function AttendancePage() {
                   <TableHead>Employee</TableHead>
                   <TableHead>Department</TableHead>
                   <TableHead>Designation</TableHead>
+                  <TableHead>Shift</TableHead>
                   <TableHead>Status</TableHead>
                   {isHrAdmin && <TableHead className="text-right">Mark Attendance</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {rows.map((row) => {
+                {filteredRows.map((row) => {
                   const busy = marking !== null && marking.startsWith(row.employeeId)
+                  const locked = LOCKED_STATUSES.has(row.status ?? "")
                   return (
                     <TableRow key={row.employeeId}>
                       <TableCell>
@@ -136,41 +220,39 @@ export default function AttendancePage() {
                       </TableCell>
                       <TableCell className="text-sm">{row.departmentName ?? "—"}</TableCell>
                       <TableCell className="text-sm">{row.designationTitle ?? "—"}</TableCell>
+                      <TableCell className="text-sm">{row.shiftName ?? "—"}</TableCell>
                       <TableCell>{statusBadge(row.status)}</TableCell>
                       {isHrAdmin && (
                         <TableCell className="text-right">
-                          <div className="flex justify-end gap-1">
-                            <Button
-                              size="sm"
-                              variant={row.status === "PRESENT" ? "default" : "outline"}
-                              className="gap-1 text-xs"
-                              disabled={busy}
-                              onClick={() => handleMark(row.employeeId, "PRESENT")}
-                            >
-                              <CheckCircle2 className="h-3.5 w-3.5" />
-                              Present
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant={row.status === "ABSENT" ? "destructive" : "outline"}
-                              className="gap-1 text-xs"
-                              disabled={busy}
-                              onClick={() => handleMark(row.employeeId, "ABSENT")}
-                            >
-                              <XCircle className="h-3.5 w-3.5" />
-                              Absent
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant={row.status === "HALF_DAY" ? "secondary" : "outline"}
-                              className="gap-1 text-xs"
-                              disabled={busy}
-                              onClick={() => handleMark(row.employeeId, "HALF_DAY")}
-                            >
-                              <Clock className="h-3.5 w-3.5" />
-                              Half Day
-                            </Button>
-                          </div>
+                          {locked ? (
+                            <div className="flex items-center justify-end gap-1 text-xs text-muted-foreground">
+                              <Lock className="h-3.5 w-3.5" />
+                              Locked
+                            </div>
+                          ) : (
+                            <div className="flex justify-end gap-1">
+                              <Button
+                                size="sm"
+                                variant={row.status === "PRESENT" ? "default" : "outline"}
+                                className="gap-1 text-xs"
+                                disabled={busy}
+                                onClick={() => handleMark(row.employeeId, "PRESENT")}
+                              >
+                                <CheckCircle2 className="h-3.5 w-3.5" />
+                                Present
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant={row.status === "ABSENT" ? "destructive" : "outline"}
+                                className="gap-1 text-xs"
+                                disabled={busy}
+                                onClick={() => handleMark(row.employeeId, "ABSENT")}
+                              >
+                                <XCircle className="h-3.5 w-3.5" />
+                                Absent
+                              </Button>
+                            </div>
+                          )}
                         </TableCell>
                       )}
                     </TableRow>

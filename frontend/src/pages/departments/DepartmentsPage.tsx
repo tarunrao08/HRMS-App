@@ -19,6 +19,8 @@ import {
 
 import departmentService, { DepartmentResponse } from "@/services/departmentService"
 import { toastApiError } from "@/services/api"
+import { useFormSnapshot } from "@/hooks/useFormSnapshot"
+import { useConfirmClose } from "@/hooks/useConfirmClose"
 
 interface FormState {
   name: string
@@ -66,12 +68,16 @@ export default function DepartmentsPage() {
     setDialogOpen(true)
   }
 
+  const { isDirty } = useFormSnapshot(dialogOpen, form)
+  const { confirmOpen, setConfirmOpen, requestClose, confirmDiscard } = useConfirmClose(() => {
+    setDialogOpen(false)
+    setEditTarget(null)
+    setForm(emptyForm)
+  })
+
   function handleDialogClose(open: boolean) {
-    if (!open && !submitting) {
-      setDialogOpen(false)
-      setEditTarget(null)
-      setForm(emptyForm)
-    }
+    if (open) { setDialogOpen(true); return }
+    if (!submitting) requestClose(isDirty())
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -250,6 +256,17 @@ export default function DepartmentsPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Cancel Confirm */}
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title="Discard changes?"
+        description="You have unsaved changes in this form. Are you sure you want to cancel? Your changes will be lost."
+        confirmLabel="Discard"
+        cancelLabel="Keep Editing"
+        onConfirm={confirmDiscard}
+      />
 
       {/* Delete Confirm Dialog */}
       <ConfirmDialog

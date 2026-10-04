@@ -4,6 +4,9 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
+import java.util.List;
+import java.util.UUID;
+
 @Data
 public class BranchRequest {
 
@@ -24,4 +27,8 @@ public class BranchRequest {
 
     @Size(max = 10)
     private String pincode;
+
+    // The full set of departments this branch offers — treated as a replace-all on every
+    // create/update, same convention as familyMembers/nominees on EmployeeRequest.
+    private List<UUID> departmentIds;
 }

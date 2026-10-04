@@ -58,13 +58,15 @@ public class EmployeeController {
             @RequestParam(defaultValue = "firstName") String sortBy,
             @RequestParam(defaultValue = "asc") String sortDir) {
 
-        Sort sort = sortDir.equalsIgnoreCase("desc")
-                ? Sort.by(sortBy).descending()
-                : Sort.by(sortBy).ascending();
-        Pageable pageable = PageRequest.of(page, size, sort);
+        Sort.Direction direction = Sort.Direction.fromString(sortDir);
+
+        // Ordering (case-insensitive by first/last name) is applied inside EmployeeSpecification via
+        // LOWER(...), so the Pageable here must stay unsorted - a Sort on firstName/lastName would
+        // override that ordering with a plain, case-sensitive one.
+        Pageable pageable = PageRequest.of(page, size);
 
         PageableResponse<EmployeeSummaryResponse> result = employeeService.search(
-                search, departmentId, designationId, branchId, managerId, status, type, pageable);
+                search, departmentId, designationId, branchId, managerId, status, type, direction, pageable);
         return ResponseEntity.ok(ApiResponse.paginated(result));
     }
 

@@ -36,11 +36,8 @@ public final class Constants {
     }
 
     public static final class EmploymentStatus {
-        public static final String ACTIVE     = "ACTIVE";
-        public static final String RESIGNED   = "RESIGNED";
-        public static final String TERMINATED = "TERMINATED";
-        public static final String ON_LEAVE   = "ON_LEAVE";
-        public static final String PROBATION  = "PROBATION";
+        public static final String ACTIVE   = "ACTIVE";
+        public static final String INACTIVE = "INACTIVE";
     }
 
     public static final class EmploymentType {

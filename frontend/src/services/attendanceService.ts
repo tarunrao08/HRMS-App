@@ -1,5 +1,6 @@
 import api from "./api"
 import type { PageableResponse } from "@/types"
+import type { EmployeeShiftResponse } from "./shiftService"
 
 export interface AttendanceRecord {
   id: string
@@ -38,21 +39,17 @@ export interface MonthlySummary {
   totalWorkingHours: number
 }
 
-export interface ShiftResponse {
-  id: string
-  name: string
-  startTime: string
-  endTime: string
-  description?: string
-}
-
 export interface TodayAttendanceRow {
   employeeId: string
   employeeName: string
   employeeCode: string
+  email?: string
+  departmentId?: string
   departmentName?: string
   designationTitle?: string
-  status?: "PRESENT" | "ABSENT" | "HALF_DAY" | string
+  shiftId?: string
+  shiftName?: string
+  status?: "PRESENT" | "ABSENT" | "HALF_DAY" | "ON_LEAVE" | string
   recordId?: string
 }
 
@@ -71,6 +68,9 @@ const attendanceService = {
   },
   markAttendance(employeeId: string, status: string) {
     return api.post<TodayAttendanceRow>("/attendance/mark", { employeeId, status })
+  },
+  getEmployeeShifts(employeeId: string) {
+    return api.get<EmployeeShiftResponse[]>(`/attendance/shifts/employee/${employeeId}`)
   },
 }
 

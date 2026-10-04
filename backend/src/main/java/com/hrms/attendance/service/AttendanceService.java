@@ -35,4 +35,11 @@ public interface AttendanceService {
     List<TodayAttendanceResponse> getTodayAttendance();
 
     TodayAttendanceResponse markAttendance(MarkAttendanceRequest request);
+
+    /**
+     * Marks ABSENT any active employee who has an assigned shift, whose shift start time
+     * plus grace period has passed (per the system's local clock), and who has no attendance
+     * record yet for today. Returns the number of employees marked absent.
+     */
+    int runAutoAbsentCheck();
 }

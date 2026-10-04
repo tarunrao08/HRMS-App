@@ -18,6 +18,16 @@ export interface PayrollRun {
   createdAt: string
 }
 
+// One earning line on a payslip (pro-rated) — mirrors PayslipComponentResponse
+export interface PayslipComponentResponse {
+  payrollComponentId: string
+  code: string
+  name: string
+  componentType: "EARNING" | "DEDUCTION" | "STATUTORY"
+  amount: number
+  displayOrder: number
+}
+
 export interface Payslip {
   id: string
   payrollRunId: string
@@ -26,13 +36,8 @@ export interface Payslip {
   employeeCode: string
   year: number
   month: number
-  // Earnings
-  basic: number
-  hra: number
-  da: number
-  conveyance: number
-  medicalAllowance: number
-  specialAllowance: number
+  // Earnings — open-ended, catalog-driven (see PayslipComponentResponse)
+  components: PayslipComponentResponse[]
   grossSalary: number
   // Deductions
   tds: number
@@ -50,6 +55,44 @@ export interface Payslip {
   createdAt: string
 }
 
+export type PayrollComponentType = "EARNING" | "DEDUCTION" | "STATUTORY"
+export type CalculationType = "FIXED" | "PERCENTAGE" | "FORMULA"
+
+// Catalog entry — mirrors PayrollComponentResponse
+export interface PayrollComponent {
+  id: string
+  name: string
+  code: string
+  componentType: PayrollComponentType
+  calculationType: CalculationType
+  value: number | null
+  percentageOfComponentId?: string | null
+  percentageOfComponentCode?: string | null
+  taxable: boolean
+  active: boolean
+  displayOrder: number
+  createdAt: string
+}
+
+// One resolved earning line on a salary structure — mirrors SalaryStructureComponentResponse
+export interface SalaryStructureComponentResponse {
+  payrollComponentId: string
+  code: string
+  name: string
+  componentType: PayrollComponentType
+  calculationType: CalculationType
+  value: number | null
+  computedAmount: number
+  displayOrder: number
+}
+
+// Per-employee override for one earning component — mirrors SalaryStructureComponentInput
+export interface SalaryStructureComponentInput {
+  payrollComponentId: string
+  calculationType?: CalculationType
+  value?: number | null
+}
+
 export interface SalaryStructureResponse {
   id: string
   employeeId: string
@@ -58,12 +101,11 @@ export interface SalaryStructureResponse {
   effectiveTo?: string
   annualCtc: number
   monthlyGross: number
-  basic: number
-  hra: number
-  da: number
-  conveyance: number
-  medicalAllowance: number
-  specialAllowance: number
+  components: SalaryStructureComponentResponse[]
+  pfEmployee: number
+  esiEmployee: number
+  professionalTax: number
+  netSalary: number
   pfApplicable: boolean
   esiApplicable: boolean
   active: boolean
@@ -74,6 +116,7 @@ export interface CreateSalaryStructureRequest {
   employeeId: string
   annualCtc: number
   effectiveFrom: string
+  components?: SalaryStructureComponentInput[]
 }
 
 export interface PayableSummaryResponse {
@@ -113,6 +156,10 @@ const payrollService = {
   },
   getTotalPayableSummary() {
     return api.get<PayableSummaryResponse>("/payroll/salary-structures/summary")
+  },
+  // Payroll component catalog
+  getActiveComponents() {
+    return api.get<PayrollComponent[]>("/payroll/components/active")
   },
   generatePayslip(employeeId: string, month: number, year: number) {
     return api.post<Payslip>("/payroll/payslips/generate", { employeeId, month, year })

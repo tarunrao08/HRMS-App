@@ -58,4 +58,17 @@ public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, UUID
             @Param("employeeId") UUID employeeId,
             @Param("startDate") LocalDate startDate,
             @Param("endDate") LocalDate endDate);
+
+    // Used by the attendance day ledger to reconcile a date range against approved leave
+    @Query("""
+            SELECT lr FROM LeaveRequest lr
+            WHERE lr.employee.id = :employeeId
+              AND lr.status = com.hrms.leave.enums.LeaveRequestStatus.APPROVED
+              AND lr.startDate <= :endDate
+              AND lr.endDate   >= :startDate
+            """)
+    List<LeaveRequest> findApprovedOverlapping(
+            @Param("employeeId") UUID employeeId,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate);
 }

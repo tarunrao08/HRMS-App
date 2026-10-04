@@ -1,7 +1,26 @@
 import api from "./api"
 
-export interface BranchRequest { name: string; city: string; state: string; country: string; address?: string }
-export interface BranchResponse { id: string; name: string; city: string; state: string; country: string; address?: string; createdAt: string }
+export interface BranchDepartmentRef { id: string; name: string }
+
+export interface BranchRequest {
+  name: string
+  city: string
+  state: string
+  country: string
+  address?: string
+  // Full replace-all set of departments this branch offers.
+  departmentIds?: string[]
+}
+export interface BranchResponse {
+  id: string
+  name: string
+  city: string
+  state: string
+  country: string
+  address?: string
+  departments?: BranchDepartmentRef[]
+  createdAt: string
+}
 
 const branchService = {
   getAll() { return api.get<BranchResponse[]>("/branches") },

@@ -9,5 +9,7 @@ public enum AttendanceStatus {
     WEEKEND,
     ON_LEAVE,
     WORK_FROM_HOME,
-    REGULARIZED
+    REGULARIZED,
+    /** No attendance record exists yet for the day — never persisted, only returned by read APIs. */
+    NOT_MARKED
 }

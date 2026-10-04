@@ -9,6 +9,8 @@ import {
   CalendarDays,
   CalendarCheck,
   CalendarRange,
+  Wallet,
+  Settings2,
   DollarSign,
   ClipboardList,
   KeyRound,
@@ -41,6 +43,8 @@ const hrNav: NavItemDef[] = [
   { icon: CalendarDays,  label: "My Leave",     to: "/leave" },
   { icon: CalendarCheck, label: "Approvals",    to: "/leave/approvals", roles: ["ROLE_HR_ADMIN", "ROLE_MANAGER"] },
   { icon: CalendarRange, label: "Leave Admin",  to: "/leave/admin",     roles: ["ROLE_HR_ADMIN"] },
+  { icon: Wallet,        label: "Leave Balances", to: "/leave/balances", roles: ["ROLE_HR_ADMIN", "ROLE_MANAGER"] },
+  { icon: Settings2,     label: "Leave Types",  to: "/leave/types",     roles: ["ROLE_HR_ADMIN"] },
   { icon: DollarSign,    label: "Payroll",      to: "/payroll",    roles: ["ROLE_HR_ADMIN"] },
   { icon: ClipboardList, label: "Onboarding",   to: "/onboarding", roles: ["ROLE_HR_ADMIN", "ROLE_MANAGER", "ROLE_EMPLOYEE"] },
 ]

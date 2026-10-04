@@ -31,26 +31,8 @@ public class Payslip extends BaseEntity {
     @Column(name = "month", nullable = false)
     private int month;
 
-    @Column(name = "basic", precision = 14, scale = 2)
-    private BigDecimal basic;
-
-    @Column(name = "hra", precision = 14, scale = 2)
-    private BigDecimal hra;
-
-    @Column(name = "special_allowance", precision = 14, scale = 2)
-    private BigDecimal specialAllowance;
-
-    @Column(name = "medical_allowance", precision = 14, scale = 2)
-    private BigDecimal medicalAllowance;
-
-    @Column(name = "conveyance", precision = 14, scale = 2)
-    private BigDecimal conveyance;
-
-    @Column(name = "da", precision = 14, scale = 2)
-    private BigDecimal da;
-
-    @Column(name = "other_earnings", precision = 14, scale = 2)
-    private BigDecimal otherEarnings;
+    // Earning breakdown (Basic, HRA, DA, ...) lives in PayslipComponent rows — mirrors
+    // whatever components were configured on the salary structure that generated this payslip.
 
     @Column(name = "gross_salary", precision = 14, scale = 2)
     private BigDecimal grossSalary;

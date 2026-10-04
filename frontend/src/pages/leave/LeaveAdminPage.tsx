@@ -1,16 +1,13 @@
 import React, { useEffect, useState, useCallback } from "react"
-import toast from "react-hot-toast"
-import { RefreshCw, Loader2, X, Check } from "lucide-react"
+import { RefreshCw } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Textarea } from "@/components/ui/textarea"
+import { Combobox } from "@/components/ui/combobox"
 import PageHeader from "@/components/shared/PageHeader"
 import Pagination from "@/components/shared/Pagination"
 import EmptyState from "@/components/shared/EmptyState"
@@ -37,60 +34,6 @@ interface EmployeeSummary { id: string; employeeCode: string; fullName: string }
 const STATUSES = ["PENDING", "APPROVED", "REJECTED", "CANCELLED"]
 const PAGE_SIZE = 20
 
-// ── Reject Dialog ─────────────────────────────────────────────────────────────
-
-interface RejectDialogProps {
-  open: boolean
-  requestId: string
-  onClose: () => void
-  onSuccess: () => void
-}
-
-function RejectDialog({ open, requestId, onClose, onSuccess }: RejectDialogProps) {
-  const [comments, setComments]     = useState("")
-  const [submitting, setSubmitting] = useState(false)
-
-  function handleClose() { setComments(""); onClose() }
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (!comments.trim()) { toast.error("Please provide a rejection reason"); return }
-    setSubmitting(true)
-    try {
-      await leaveService.reject(requestId, comments.trim())
-      toast.success("Leave request rejected")
-      setComments("")
-      onSuccess()
-    } catch (err) {
-      toastApiError(err, "Failed to reject")
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
-      <DialogContent className="sm:max-w-sm">
-        <DialogHeader><DialogTitle>Reject Leave Request</DialogTitle></DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4 mt-2">
-          <div className="space-y-1.5">
-            <Label>Rejection Reason <span className="text-destructive">*</span></Label>
-            <Textarea placeholder="State the reason for rejection…" value={comments}
-              onChange={(e) => setComments(e.target.value)} rows={3} required />
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={handleClose} disabled={submitting}>Cancel</Button>
-            <Button type="submit" variant="destructive" disabled={submitting}>
-              {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Reject
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function LeaveAdminPage() {
@@ -103,9 +46,6 @@ export default function LeaveAdminPage() {
 
   const [filterEmployee, setFilterEmployee] = useState("ALL")
   const [filterStatus, setFilterStatus]     = useState("ALL")
-
-  const [rejectId, setRejectId]     = useState("")
-  const [rejectOpen, setRejectOpen] = useState(false)
 
   useEffect(() => {
     employeeService.getSummaries()
@@ -143,16 +83,6 @@ export default function LeaveAdminPage() {
 
   useEffect(() => { setPage(0); fetchAll(0) }, [fetchAll])
 
-  async function handleApprove(id: string) {
-    try {
-      await leaveService.approve(id)
-      toast.success("Leave request approved")
-      fetchAll(page)
-    } catch (err) {
-      toastApiError(err, "Failed to approve")
-    }
-  }
-
   return (
     <div className="space-y-6">
       <PageHeader
@@ -169,19 +99,17 @@ export default function LeaveAdminPage() {
       <Card>
         <CardContent className="pt-4">
           <div className="flex flex-wrap items-center gap-3">
-            <Select value={filterEmployee} onValueChange={setFilterEmployee}>
-              <SelectTrigger className="w-56">
-                <SelectValue placeholder="All Employees" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ALL">All Employees</SelectItem>
-                {employees.map((e) => (
-                  <SelectItem key={e.id} value={e.id}>
-                    {e.fullName} ({e.employeeCode})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Combobox
+              className="w-56"
+              options={[
+                { value: "ALL", label: "All Employees" },
+                ...employees.map((e) => ({ value: e.id, label: `${e.fullName} (${e.employeeCode})` })),
+              ]}
+              value={filterEmployee}
+              onChange={setFilterEmployee}
+              placeholder="All Employees"
+              searchPlaceholder="Search employees…"
+            />
 
             <Select value={filterStatus} onValueChange={setFilterStatus}>
               <SelectTrigger className="w-40">
@@ -225,7 +153,6 @@ export default function LeaveAdminPage() {
                     <TableHead className="text-center">Days</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Applied</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -245,22 +172,6 @@ export default function LeaveAdminPage() {
                       <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
                         {new Date(r.appliedAt).toLocaleDateString()}
                       </TableCell>
-                      <TableCell className="text-right">
-                        {r.status === "PENDING" && (
-                          <div className="flex items-center justify-end gap-1">
-                            <Button size="icon" variant="ghost"
-                              className="text-green-600 hover:text-green-700 hover:bg-green-50"
-                              title="Approve" onClick={() => handleApprove(r.id)}>
-                              <Check className="h-4 w-4" />
-                            </Button>
-                            <Button size="icon" variant="ghost"
-                              className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                              title="Reject" onClick={() => { setRejectId(r.id); setRejectOpen(true) }}>
-                              <X className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        )}
-                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -276,13 +187,6 @@ export default function LeaveAdminPage() {
           )}
         </CardContent>
       </Card>
-
-      <RejectDialog
-        open={rejectOpen}
-        requestId={rejectId}
-        onClose={() => setRejectOpen(false)}
-        onSuccess={() => { setRejectOpen(false); fetchAll(page) }}
-      />
     </div>
   )
 }

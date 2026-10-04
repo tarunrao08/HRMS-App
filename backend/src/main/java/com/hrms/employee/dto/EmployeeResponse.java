@@ -7,6 +7,7 @@ import lombok.Data;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 
 @Data
@@ -50,4 +51,7 @@ public class EmployeeResponse {
     private Instant createdAt;
     private Instant updatedAt;
     private String createdBy;
+
+    private List<FamilyMemberResponse> familyMembers;
+    private List<NomineeResponse> nominees;
 }

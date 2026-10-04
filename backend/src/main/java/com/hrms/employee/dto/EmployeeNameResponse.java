@@ -11,4 +11,6 @@ public class EmployeeNameResponse {
     private UUID id;
     private String employeeCode;
     private String fullName;
+    private UUID departmentId;
+    private boolean managerial;
 }

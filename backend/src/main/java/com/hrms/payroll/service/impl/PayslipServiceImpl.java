@@ -4,7 +4,9 @@ import com.hrms.common.dto.PageableResponse;
 import com.hrms.common.exception.ResourceNotFoundException;
 import com.hrms.payroll.dto.PayslipResponse;
 import com.hrms.payroll.entity.Payslip;
+import com.hrms.payroll.mapper.PayslipComponentMapper;
 import com.hrms.payroll.mapper.PayslipMapper;
+import com.hrms.payroll.repository.PayslipComponentRepository;
 import com.hrms.payroll.repository.PayslipRepository;
 import com.hrms.payroll.service.PayslipService;
 import lombok.RequiredArgsConstructor;
@@ -27,7 +29,9 @@ import java.util.UUID;
 public class PayslipServiceImpl implements PayslipService {
 
     private final PayslipRepository payslipRepository;
+    private final PayslipComponentRepository payslipComponentRepository;
     private final PayslipMapper payslipMapper;
+    private final PayslipComponentMapper payslipComponentMapper;
 
     @Override
     @Transactional(readOnly = true)
@@ -35,14 +39,14 @@ public class PayslipServiceImpl implements PayslipService {
         Payslip payslip = payslipRepository.findByEmployeeIdAndYearAndMonth(employeeId, year, month)
                 .orElseThrow(() -> new ResourceNotFoundException("Payslip", "employeeId/year/month",
                         employeeId + "/" + year + "/" + month));
-        return payslipMapper.toResponse(payslip);
+        return toResponseWithComponents(payslip);
     }
 
     @Override
     @Transactional(readOnly = true)
     public PageableResponse<PayslipResponse> getByEmployee(UUID employeeId, Pageable pageable) {
         Page<PayslipResponse> page = payslipRepository.findByEmployeeId(employeeId, pageable)
-                .map(payslipMapper::toResponse);
+                .map(this::toResponseWithComponents);
         return PageableResponse.of(page);
     }
 
@@ -54,14 +58,14 @@ public class PayslipServiceImpl implements PayslipService {
         payslip.setPublishedAt(Instant.now());
         payslip = payslipRepository.save(payslip);
         log.info("Published payslip: {}", payslipId);
-        return payslipMapper.toResponse(payslip);
+        return toResponseWithComponents(payslip);
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<PayslipResponse> getByRun(UUID runId) {
         return payslipRepository.findByPayrollRunId(runId).stream()
-                .map(payslipMapper::toResponse)
+                .map(this::toResponseWithComponents)
                 .toList();
     }
 
@@ -73,7 +77,7 @@ public class PayslipServiceImpl implements PayslipService {
                 .getContent()
                 .stream()
                 .findFirst()
-                .map(payslipMapper::toResponse);
+                .map(this::toResponseWithComponents);
     }
 
     @Override
@@ -81,7 +85,14 @@ public class PayslipServiceImpl implements PayslipService {
     public PageableResponse<PayslipResponse> getMyPayslips(UUID employeeId, Pageable pageable) {
         Page<PayslipResponse> page = payslipRepository
                 .findLatestVisibleForEmployee(employeeId, pageable)
-                .map(payslipMapper::toResponse);
+                .map(this::toResponseWithComponents);
         return PageableResponse.of(page);
+    }
+
+    private PayslipResponse toResponseWithComponents(Payslip payslip) {
+        PayslipResponse response = payslipMapper.toResponse(payslip);
+        response.setComponents(payslipComponentMapper.toResponseList(
+                payslipComponentRepository.findByPayslipId(payslip.getId())));
+        return response;
     }
 }

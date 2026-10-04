@@ -8,6 +8,7 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.math.BigDecimal;
+import java.util.UUID;
 
 @Getter
 @Setter
@@ -27,7 +28,8 @@ public class PayrollComponentRequest {
 
     private BigDecimal value;
 
-    private String percentageOf;
+    /** Component this percentage is taken of, when calculationType is PERCENTAGE. Null = percentage of monthly gross. */
+    private UUID percentageOfComponentId;
 
     private boolean taxable;
 

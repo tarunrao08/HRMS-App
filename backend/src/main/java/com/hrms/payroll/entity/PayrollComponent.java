@@ -34,8 +34,15 @@ public class PayrollComponent extends BaseEntity {
     @Column(name = "value", precision = 12, scale = 4)
     private BigDecimal value;
 
-    @Column(name = "percentage_of", length = 50)
-    private String percentageOf;
+    /**
+     * When calculationType is PERCENTAGE, the component this percentage is taken of.
+     * Null means "percentage of monthly gross" (the default basis). When set, resolution
+     * requires the referenced component to be a non-PERCENTAGE-chained, already-resolved
+     * component — see SalaryStructureServiceImpl for the two-pass resolution order.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "percentage_of_component_id")
+    private PayrollComponent percentageOfComponent;
 
     @Column(name = "is_taxable")
     private boolean taxable;

@@ -12,5 +12,6 @@ public interface SalaryStructureMapper {
     @Mapping(source = "grossSalary", target = "monthlyGross")
     @Mapping(expression = "java(structure.getEmployee().getFirstName() + \" \" + structure.getEmployee().getLastName())",
              target = "employeeName")
+    @Mapping(target = "components", ignore = true) // populated separately by the service from SalaryStructureComponent rows
     SalaryStructureResponse toResponse(SalaryStructure structure);
 }

@@ -14,6 +14,8 @@ import AttendancePage    from "@/pages/attendance/AttendancePage"
 import LeavePage         from "@/pages/leave/LeavePage"
 import ApprovalsPage     from "@/pages/leave/ApprovalsPage"
 import LeaveAdminPage    from "@/pages/leave/LeaveAdminPage"
+import LeaveTypesPage    from "@/pages/leave/LeaveTypesPage"
+import LeaveBalancesPage from "@/pages/leave/LeaveBalancesPage"
 import PayrollPage       from "@/pages/payroll/PayrollPage"
 import OnboardingPage    from "@/pages/onboarding/OnboardingPage"
 import UserAccountsPage  from "@/pages/users/UserAccountsPage"
@@ -58,6 +60,7 @@ export default function App() {
           <Route element={<AppLayout />}>
             <Route path="/employees"        element={<EmployeesPage />} />
             <Route path="/leave/approvals"  element={<ApprovalsPage />} />
+            <Route path="/leave/balances"   element={<LeaveBalancesPage />} />
           </Route>
         </Route>
 
@@ -70,6 +73,7 @@ export default function App() {
             <Route path="/branches"     element={<BranchesPage />} />
             <Route path="/users"        element={<UserAccountsPage />} />
             <Route path="/leave/admin"  element={<LeaveAdminPage />} />
+            <Route path="/leave/types"  element={<LeaveTypesPage />} />
           </Route>
         </Route>
 

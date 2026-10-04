@@ -1,6 +1,7 @@
 package com.hrms.leave.entity;
 
 import com.hrms.common.entity.BaseEntity;
+import com.hrms.employee.enums.Gender;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -46,4 +47,12 @@ public class LeaveType extends BaseEntity {
     @Column(name = "is_active")
     @Builder.Default
     private boolean active = true;
+
+    @Column(name = "is_tenure_based")
+    private boolean tenureBased;
+
+    /** Null = applicable to every employee. Set to restrict allocation (e.g. Maternity Leave -> FEMALE). */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "applicable_gender", length = 10)
+    private Gender applicableGender;
 }

@@ -6,6 +6,7 @@ import lombok.Setter;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 
 @Getter
@@ -21,13 +22,8 @@ public class SalaryStructureResponse {
     private BigDecimal annualCtc;
     private BigDecimal monthlyGross;
 
-    // Component breakdown (computed, read-only)
-    private BigDecimal basic;
-    private BigDecimal hra;
-    private BigDecimal da;
-    private BigDecimal conveyance;
-    private BigDecimal medicalAllowance;
-    private BigDecimal specialAllowance;
+    // Earning component breakdown — open-ended, catalog-driven (see SalaryStructureComponent)
+    private List<SalaryStructureComponentResponse> components;
 
     // Statutory deductions (pre-computed at structure creation time)
     private BigDecimal pfEmployee;

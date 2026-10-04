@@ -2,8 +2,8 @@ package com.hrms.bot.service.impl;
 
 import com.hrms.auth.entity.User;
 import com.hrms.auth.repository.UserRepository;
-import com.hrms.attendance.entity.AttendanceMonthlySummary;
-import com.hrms.attendance.repository.AttendanceMonthlySummaryRepository;
+import com.hrms.attendance.dto.AttendanceMonthlySummaryResponse;
+import com.hrms.attendance.service.AttendanceService;
 import com.hrms.bot.dto.BotChatResponse;
 import com.hrms.bot.service.BotService;
 import com.hrms.employee.enums.EmploymentStatus;
@@ -11,7 +11,9 @@ import com.hrms.employee.repository.EmployeeRepository;
 import com.hrms.leave.enums.LeaveRequestStatus;
 import com.hrms.leave.repository.LeaveBalanceRepository;
 import com.hrms.leave.repository.LeaveRequestRepository;
+import com.hrms.payroll.repository.PayslipComponentRepository;
 import com.hrms.payroll.repository.PayslipRepository;
+import com.hrms.payroll.repository.SalaryStructureComponentRepository;
 import com.hrms.payroll.repository.SalaryStructureRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -25,6 +27,7 @@ import java.math.BigDecimal;
 import java.text.NumberFormat;
 import java.time.LocalDate;
 import java.time.temporal.TemporalAdjusters;
+import java.util.Comparator;
 import java.util.Locale;
 import java.util.UUID;
 
@@ -39,8 +42,10 @@ public class BotServiceImpl implements BotService {
     private final PayslipRepository                  payslipRepository;
     private final LeaveBalanceRepository             leaveBalanceRepository;
     private final LeaveRequestRepository             leaveRequestRepository;
-    private final AttendanceMonthlySummaryRepository attendanceSummaryRepository;
+    private final AttendanceService                  attendanceService;
     private final SalaryStructureRepository          salaryStructureRepository;
+    private final SalaryStructureComponentRepository salaryStructureComponentRepository;
+    private final PayslipComponentRepository         payslipComponentRepository;
 
     private static final String[] MONTHS = {
         "", "January", "February", "March", "April", "May", "June",
@@ -201,34 +206,38 @@ public class BotServiceImpl implements BotService {
         var page = payslipRepository.findLatestVisibleForEmployee(employeeId, PageRequest.of(0, 1));
         if (!page.isEmpty()) {
             var p = page.getContent().get(0);
-            return "Your payslip for " + MONTHS[p.getMonth()] + " " + p.getYear() + ":\n\n" +
-                   "Earnings:\n" +
-                   "• Basic:        " + inr(p.getBasic()) + "\n" +
-                   "• HRA:          " + inr(p.getHra()) + "\n" +
-                   "• DA:           " + inr(p.getDa()) + "\n" +
-                   "• Conveyance:   " + inr(p.getConveyance()) + "\n" +
-                   "• Gross Pay:    " + inr(p.getGrossSalary()) + "\n\n" +
-                   "Deductions:\n" +
-                   "• TDS:          " + inr(p.getTds()) + "\n" +
-                   "• PF:           " + inr(p.getPfDeduction()) + "\n" +
-                   "• ESI:          " + inr(p.getEsiDeduction()) + "\n" +
-                   "• Prof. Tax:    " + inr(p.getProfessionalTax()) + "\n\n" +
-                   "Net Pay: " + inr(p.getNetSalary());
+            StringBuilder sb = new StringBuilder("Your payslip for " + MONTHS[p.getMonth()] + " " + p.getYear() + ":\n\n")
+                    .append("Earnings:\n");
+            payslipComponentRepository.findByPayslipId(p.getId()).stream()
+                    .sorted(Comparator.comparingInt(c -> c.getPayrollComponent().getDisplayOrder()))
+                    .forEach(c -> sb.append("• ").append(c.getPayrollComponent().getName()).append(":  ")
+                            .append(inr(c.getAmount())).append("\n"));
+            sb.append("• Gross Pay:    ").append(inr(p.getGrossSalary())).append("\n\n")
+              .append("Deductions:\n")
+              .append("• TDS:          ").append(inr(p.getTds())).append("\n")
+              .append("• PF:           ").append(inr(p.getPfDeduction())).append("\n")
+              .append("• ESI:          ").append(inr(p.getEsiDeduction())).append("\n")
+              .append("• Prof. Tax:    ").append(inr(p.getProfessionalTax())).append("\n\n")
+              .append("Net Pay: ").append(inr(p.getNetSalary()));
+            return sb.toString();
         }
 
         // Fallback: show salary structure if no payslip yet
         var structures = salaryStructureRepository.findActiveForEmployee(employeeId, LocalDate.now());
         if (!structures.isEmpty()) {
             var s = structures.get(0);
-            return "No payslip generated yet.\n\n" +
-                   "Your current salary structure:\n" +
-                   "• Annual CTC:      " + inr(s.getAnnualCtc()) + "\n" +
-                   "• Monthly Gross:   " + inr(s.getGrossSalary()) + "\n" +
-                   "• Basic:           " + inr(s.getBasic()) + "\n" +
-                   "• HRA:             " + inr(s.getHra()) + "\n" +
-                   "• PF (Employee):   " + inr(s.getPfEmployee()) + "\n" +
-                   "• Est. Net Salary: " + inr(s.getNetSalary()) + "\n\n" +
-                   "Your payslip will appear here once HR generates it.";
+            StringBuilder sb = new StringBuilder("No payslip generated yet.\n\n")
+                    .append("Your current salary structure:\n")
+                    .append("• Annual CTC:      ").append(inr(s.getAnnualCtc())).append("\n")
+                    .append("• Monthly Gross:   ").append(inr(s.getGrossSalary())).append("\n");
+            salaryStructureComponentRepository.findBySalaryStructureId(s.getId()).stream()
+                    .sorted(Comparator.comparingInt(c -> c.getPayrollComponent().getDisplayOrder()))
+                    .forEach(c -> sb.append("• ").append(c.getPayrollComponent().getName()).append(":  ")
+                            .append(inr(c.getComputedAmount())).append("\n"));
+            sb.append("• PF (Employee):   ").append(inr(s.getPfEmployee())).append("\n")
+              .append("• Est. Net Salary: ").append(inr(s.getNetSalary())).append("\n\n")
+              .append("Your payslip will appear here once HR generates it.");
+            return sb.toString();
         }
 
         return "No salary information found yet. Please contact HR if you believe this is incorrect.";
@@ -284,13 +293,10 @@ public class BotServiceImpl implements BotService {
     private String buildAttendance(UUID employeeId) {
         if (employeeId == null) return noEmployeeMsg();
         var now = LocalDate.now();
-        var opt = attendanceSummaryRepository.findByEmployeeIdAndYearAndMonth(
-                employeeId, now.getYear(), now.getMonthValue());
-        if (opt.isEmpty()) {
-            return "No attendance record found for " + MONTHS[now.getMonthValue()] + " " + now.getYear() +
-                   ".\nAttendance is typically updated after the month closes.";
+        var s = attendanceService.getMonthlySummary(employeeId, now.getYear(), now.getMonthValue());
+        if (s.getPresentDays() == 0 && s.getAbsentDays() == 0 && s.getLateDays() == 0 && s.getHalfDays() == 0) {
+            return "No attendance recorded yet for " + MONTHS[now.getMonthValue()] + " " + now.getYear() + ".";
         }
-        var s = opt.get();
         return "Your attendance for " + MONTHS[s.getMonth()] + " " + s.getYear() + ":\n\n" +
                "• Working Days:  " + s.getWorkingDays() + "\n" +
                "• Present Days:  " + s.getPresentDays() + "\n" +
@@ -379,13 +385,12 @@ public class BotServiceImpl implements BotService {
 
     private String buildHrAttendanceOverview() {
         var now = LocalDate.now();
-        var summaries = attendanceSummaryRepository.findByYearAndMonth(now.getYear(), now.getMonthValue());
+        var summaries = attendanceService.getAllMonthlySummaries(now.getYear(), now.getMonthValue());
         if (summaries.isEmpty()) {
-            return "No attendance records found for " + MONTHS[now.getMonthValue()] + " " + now.getYear() +
-                   ".\nAttendance data may not have been recorded yet this month.";
+            return "No active employees found to report attendance for.";
         }
-        long totalPresent = summaries.stream().mapToLong(AttendanceMonthlySummary::getPresentDays).sum();
-        long totalAbsent  = summaries.stream().mapToLong(AttendanceMonthlySummary::getAbsentDays).sum();
+        long totalPresent = summaries.stream().mapToLong(AttendanceMonthlySummaryResponse::getPresentDays).sum();
+        long totalAbsent  = summaries.stream().mapToLong(AttendanceMonthlySummaryResponse::getAbsentDays).sum();
         long withAbsences = summaries.stream().filter(s -> s.getAbsentDays() > 0).count();
         return "Attendance Overview — " + MONTHS[now.getMonthValue()] + " " + now.getYear() + ":\n\n" +
                "• Employees Tracked:       " + summaries.size() + "\n" +

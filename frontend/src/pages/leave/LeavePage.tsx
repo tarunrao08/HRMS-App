@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react"
+import React, { useEffect, useState, useCallback, useRef } from "react"
 import toast from "react-hot-toast"
 import { Plus, Loader2 } from "lucide-react"
 
@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
+import { Checkbox } from "@/components/ui/checkbox"
 import PageHeader from "@/components/shared/PageHeader"
 import Pagination from "@/components/shared/Pagination"
 import EmptyState from "@/components/shared/EmptyState"
@@ -19,7 +20,9 @@ import EmptyState from "@/components/shared/EmptyState"
 import { useAuthStore } from "@/store/authStore"
 import leaveService from "@/services/leaveService"
 import { toastApiError } from "@/services/api"
-import type { LeaveType, LeaveBalance, LeaveRequest } from "@/services/leaveService"
+import type { LeaveType, LeaveBalance, LeaveRequest, HalfDayType } from "@/services/leaveService"
+import ConfirmDialog from "@/components/shared/ConfirmDialog"
+import { useConfirmClose } from "@/hooks/useConfirmClose"
 
 type BadgeVariant = "default" | "secondary" | "destructive" | "outline" | "success" | "warning"
 
@@ -42,32 +45,81 @@ interface ApplyDialogProps {
   onClose: () => void
   onSuccess: () => void
   leaveTypes: LeaveType[]
+  initialLeaveTypeId?: string
 }
 
-function ApplyLeaveDialog({ open, onClose, onSuccess, leaveTypes }: ApplyDialogProps) {
+function ApplyLeaveDialog({ open, onClose, onSuccess, leaveTypes, initialLeaveTypeId }: ApplyDialogProps) {
   const [leaveTypeId, setLeaveTypeId] = useState("")
   const [fromDate, setFromDate]       = useState("")
   const [toDate, setToDate]           = useState("")
+  const [halfDay, setHalfDay]         = useState(false)
+  const [halfDayType, setHalfDayType] = useState<HalfDayType>("FIRST_HALF")
   const [reason, setReason]           = useState("")
   const [submitting, setSubmitting]   = useState(false)
 
   function reset() {
-    setLeaveTypeId(""); setFromDate(""); setToDate(""); setReason("")
+    setLeaveTypeId(""); setFromDate(""); setToDate("")
+    setHalfDay(false); setHalfDayType("FIRST_HALF"); setReason("")
+  }
+
+  useEffect(() => {
+    if (open) setLeaveTypeId(initialLeaveTypeId ?? "")
+  }, [open, initialLeaveTypeId])
+
+  // Baseline reflects the prop-driven pre-fill directly (not the `leaveTypeId` state,
+  // which only catches up to it a render later) so opening pre-filled never reads dirty.
+  const snapshotRef = useRef({
+    leaveTypeId: initialLeaveTypeId ?? "", fromDate: "", toDate: "",
+    halfDay: false, halfDayType: "FIRST_HALF" as HalfDayType, reason: "",
+  })
+  const wasOpen = useRef(false)
+  useEffect(() => {
+    if (open && !wasOpen.current) {
+      snapshotRef.current = {
+        leaveTypeId: initialLeaveTypeId ?? "", fromDate: "", toDate: "",
+        halfDay: false, halfDayType: "FIRST_HALF", reason: "",
+      }
+    }
+    wasOpen.current = open
+  }, [open, initialLeaveTypeId])
+
+  function isDirty(): boolean {
+    return JSON.stringify({ leaveTypeId, fromDate, toDate, halfDay, halfDayType, reason })
+      !== JSON.stringify(snapshotRef.current)
+  }
+  const { confirmOpen, setConfirmOpen, requestClose, confirmDiscard } =
+    useConfirmClose(() => { reset(); onClose() })
+
+  function handleHalfDayChange(checked: boolean) {
+    setHalfDay(checked)
+    if (checked) setToDate(fromDate)
+  }
+
+  function handleFromDateChange(v: string) {
+    setFromDate(v)
+    if (halfDay) setToDate(v)
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!leaveTypeId || !fromDate || !toDate || !reason.trim()) {
+    if (!leaveTypeId || !fromDate || (!halfDay && !toDate) || !reason.trim()) {
       toast.error("Please fill all required fields")
       return
     }
-    if (toDate < fromDate) {
+    if (!halfDay && toDate < fromDate) {
       toast.error("To date must be on or after From date")
       return
     }
     setSubmitting(true)
     try {
-      await leaveService.apply({ leaveTypeId, startDate: fromDate, endDate: toDate, reason: reason.trim() })
+      await leaveService.apply({
+        leaveTypeId,
+        startDate: fromDate,
+        endDate: halfDay ? fromDate : toDate,
+        halfDay,
+        halfDayType: halfDay ? halfDayType : undefined,
+        reason: reason.trim(),
+      })
       toast.success("Leave request submitted successfully")
       reset()
       onSuccess()
@@ -79,7 +131,8 @@ function ApplyLeaveDialog({ open, onClose, onSuccess, leaveTypes }: ApplyDialogP
   }
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && (reset(), onClose())}>
+    <>
+    <Dialog open={open} onOpenChange={(o) => { if (!o) requestClose(isDirty()) }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader><DialogTitle>Apply for Leave</DialogTitle></DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4 mt-2">
@@ -90,7 +143,7 @@ function ApplyLeaveDialog({ open, onClose, onSuccess, leaveTypes }: ApplyDialogP
               <SelectContent>
                 {leaveTypes.map((lt) => (
                   <SelectItem key={lt.id} value={lt.id}>
-                    {lt.name} ({lt.code}) — {lt.maxDaysPerYear}d/yr
+                    {lt.name} ({lt.code})
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -100,13 +153,32 @@ function ApplyLeaveDialog({ open, onClose, onSuccess, leaveTypes }: ApplyDialogP
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label>From Date <span className="text-destructive">*</span></Label>
-              <Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} required />
+              <Input type="date" value={fromDate} onChange={(e) => handleFromDateChange(e.target.value)} required />
             </div>
             <div className="space-y-1.5">
               <Label>To Date <span className="text-destructive">*</span></Label>
-              <Input type="date" value={toDate} min={fromDate || undefined} onChange={(e) => setToDate(e.target.value)} required />
+              <Input type="date" value={halfDay ? fromDate : toDate} min={fromDate || undefined}
+                onChange={(e) => setToDate(e.target.value)} disabled={halfDay} required />
             </div>
           </div>
+
+          <div className="flex items-center gap-2">
+            <Checkbox id="halfDay" checked={halfDay} onCheckedChange={(c) => handleHalfDayChange(c === true)} />
+            <Label htmlFor="halfDay" className="font-normal cursor-pointer">Half day</Label>
+          </div>
+
+          {halfDay && (
+            <div className="space-y-1.5">
+              <Label>Half <span className="text-destructive">*</span></Label>
+              <Select value={halfDayType} onValueChange={(v) => setHalfDayType(v as HalfDayType)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="FIRST_HALF">First Half</SelectItem>
+                  <SelectItem value="SECOND_HALF">Second Half</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           <div className="space-y-1.5">
             <Label>Reason <span className="text-destructive">*</span></Label>
@@ -115,7 +187,7 @@ function ApplyLeaveDialog({ open, onClose, onSuccess, leaveTypes }: ApplyDialogP
           </div>
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => { reset(); onClose() }} disabled={submitting}>
+            <Button type="button" variant="outline" onClick={() => requestClose(isDirty())} disabled={submitting}>
               Cancel
             </Button>
             <Button type="submit" disabled={submitting}>
@@ -126,6 +198,16 @@ function ApplyLeaveDialog({ open, onClose, onSuccess, leaveTypes }: ApplyDialogP
         </form>
       </DialogContent>
     </Dialog>
+    <ConfirmDialog
+      open={confirmOpen}
+      onOpenChange={setConfirmOpen}
+      title="Discard changes?"
+      description="You have unsaved changes in this form. Are you sure you want to cancel? Your changes will be lost."
+      confirmLabel="Discard"
+      cancelLabel="Keep Editing"
+      onConfirm={confirmDiscard}
+    />
+    </>
   )
 }
 
@@ -145,6 +227,12 @@ export default function LeavePage() {
   const [totalPages, setTotalPages]   = useState(0)
   const [totalElements, setTotalElements] = useState(0)
   const [applyOpen, setApplyOpen]     = useState(false)
+  const [applyLeaveTypeId, setApplyLeaveTypeId] = useState<string | undefined>(undefined)
+
+  function openApplyDialog(leaveTypeId?: string) {
+    setApplyLeaveTypeId(leaveTypeId)
+    setApplyOpen(true)
+  }
 
   useEffect(() => {
     if (!hasEmployeeLink) return
@@ -216,7 +304,7 @@ export default function LeavePage() {
         title="My Leave"
         description="View your leave balances and manage leave requests."
         action={
-          <Button onClick={() => setApplyOpen(true)}>
+          <Button onClick={() => openApplyDialog()}>
             <Plus className="mr-2 h-4 w-4" />
             Apply Leave
           </Button>
@@ -244,7 +332,12 @@ export default function LeavePage() {
               const pending = b.pendingDays ?? 0
               const avail   = b.availableDays ?? 0
               return (
-                <Card key={b.id}>
+                <Card
+                  key={b.id}
+                  className="cursor-pointer transition-shadow hover:shadow-md"
+                  onClick={() => openApplyDialog(b.leaveTypeId)}
+                  title="Apply for this leave type"
+                >
                   <CardHeader className="pb-2">
                     <CardTitle className="text-base">{b.leaveTypeName}</CardTitle>
                     <p className="text-xs text-muted-foreground">{b.leaveTypeCode} · {b.year}</p>
@@ -304,6 +397,8 @@ export default function LeavePage() {
                       <TableHead className="text-center">Days</TableHead>
                       <TableHead>Reason</TableHead>
                       <TableHead>Status</TableHead>
+                      <TableHead className="text-center">L1</TableHead>
+                      <TableHead className="text-center">L2</TableHead>
                       <TableHead>Applied</TableHead>
                       <TableHead className="text-right">Action</TableHead>
                     </TableRow>
@@ -318,6 +413,16 @@ export default function LeavePage() {
                         <TableCell className="max-w-[160px] truncate" title={r.reason}>{r.reason}</TableCell>
                         <TableCell>
                           <Badge variant={statusVariant(r.status)}>{r.status}</Badge>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {r.l1Status
+                            ? <Badge variant={statusVariant(r.l1Status)}>{r.l1Status}</Badge>
+                            : <span className="text-muted-foreground">—</span>}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {r.l2Status
+                            ? <Badge variant={statusVariant(r.l2Status)}>{r.l2Status}</Badge>
+                            : <span className="text-muted-foreground">—</span>}
                         </TableCell>
                         <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
                           {new Date(r.appliedAt).toLocaleDateString()}
@@ -358,6 +463,7 @@ export default function LeavePage() {
         onClose={() => setApplyOpen(false)}
         onSuccess={() => { setApplyOpen(false); fetchRequests(0); fetchBalances() }}
         leaveTypes={leaveTypes}
+        initialLeaveTypeId={applyLeaveTypeId}
       />
     </div>
   )

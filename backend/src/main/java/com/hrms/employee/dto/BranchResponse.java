@@ -3,6 +3,7 @@ package com.hrms.employee.dto;
 import lombok.Data;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 @Data
@@ -14,6 +15,7 @@ public class BranchResponse {
     private String state;
     private String country;
     private String pincode;
+    private List<DepartmentResponse> departments;
     private Instant createdAt;
     private Instant updatedAt;
 }

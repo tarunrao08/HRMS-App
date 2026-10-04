@@ -13,6 +13,7 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select"
+import { Combobox } from "@/components/ui/combobox"
 import {
   Table,
   TableHeader,
@@ -41,6 +42,9 @@ import employeeService from "@/services/employeeService"
 import { toastApiError } from "@/services/api"
 import { useAuthStore } from "@/store/authStore"
 import { useIsHrAdmin } from "@/hooks/useRole"
+import ConfirmDialog from "@/components/shared/ConfirmDialog"
+import { useFormSnapshot } from "@/hooks/useFormSnapshot"
+import { useConfirmClose } from "@/hooks/useConfirmClose"
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -109,6 +113,10 @@ function CompleteTaskDialog({ task, onOpenChange, onCompleted }: CompleteTaskDia
     if (task) setRemarks("")
   }, [task?.id])
 
+  const { isDirty } = useFormSnapshot(!!task, remarks)
+  const { confirmOpen, setConfirmOpen, requestClose, confirmDiscard } =
+    useConfirmClose(() => onOpenChange(false))
+
   function handleConfirm() {
     if (!task) return
     setSaving(true)
@@ -124,7 +132,8 @@ function CompleteTaskDialog({ task, onOpenChange, onCompleted }: CompleteTaskDia
   }
 
   return (
-    <Dialog open={!!task} onOpenChange={(open) => !open && onOpenChange(false)}>
+    <>
+    <Dialog open={!!task} onOpenChange={(open) => { if (!open) requestClose(isDirty()) }}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
           <DialogTitle>Complete Task</DialogTitle>
@@ -158,6 +167,16 @@ function CompleteTaskDialog({ task, onOpenChange, onCompleted }: CompleteTaskDia
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <ConfirmDialog
+      open={confirmOpen}
+      onOpenChange={setConfirmOpen}
+      title="Discard changes?"
+      description="You have unsaved changes in this form. Are you sure you want to cancel? Your changes will be lost."
+      confirmLabel="Discard"
+      cancelLabel="Keep Editing"
+      onConfirm={confirmDiscard}
+    />
+    </>
   )
 }
 
@@ -180,6 +199,10 @@ function UploadDocumentDialog({ task, workflowId, onOpenChange, onUploaded }: Up
     if (task) { setDocumentType(""); setFile(null) }
   }, [task?.id])
 
+  const { isDirty } = useFormSnapshot(!!task, { documentType, fileName: file?.name ?? "" })
+  const { confirmOpen, setConfirmOpen, requestClose, confirmDiscard } =
+    useConfirmClose(() => onOpenChange(false))
+
   function handleSubmit() {
     if (!task || !file || !documentType.trim()) {
       toast.error("Please select a file and enter a document type.")
@@ -199,7 +222,8 @@ function UploadDocumentDialog({ task, workflowId, onOpenChange, onUploaded }: Up
   }
 
   return (
-    <Dialog open={!!task} onOpenChange={(open) => !open && onOpenChange(false)}>
+    <>
+    <Dialog open={!!task} onOpenChange={(open) => { if (!open) requestClose(isDirty()) }}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
           <DialogTitle>Upload Document</DialogTitle>
@@ -254,6 +278,16 @@ function UploadDocumentDialog({ task, workflowId, onOpenChange, onUploaded }: Up
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <ConfirmDialog
+      open={confirmOpen}
+      onOpenChange={setConfirmOpen}
+      title="Discard changes?"
+      description="You have unsaved changes in this form. Are you sure you want to cancel? Your changes will be lost."
+      confirmLabel="Discard"
+      cancelLabel="Keep Editing"
+      onConfirm={confirmDiscard}
+    />
+    </>
   )
 }
 
@@ -453,6 +487,10 @@ function InitiateDialog({ open, onOpenChange, onInitiated }: InitiateDialogProps
     }
   }, [open])
 
+  const { isDirty } = useFormSnapshot(open, { employeeId, templateId })
+  const { confirmOpen, setConfirmOpen, requestClose, confirmDiscard } =
+    useConfirmClose(() => onOpenChange(false))
+
   function handleSubmit() {
     if (!employeeId || !templateId) {
       toast.error("Please select both an employee and a template.")
@@ -472,7 +510,8 @@ function InitiateDialog({ open, onOpenChange, onInitiated }: InitiateDialogProps
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+    <Dialog open={open} onOpenChange={(next) => { if (next) onOpenChange(true); else requestClose(isDirty()) }}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
           <DialogTitle>Initiate Onboarding</DialogTitle>
@@ -481,18 +520,14 @@ function InitiateDialog({ open, onOpenChange, onInitiated }: InitiateDialogProps
         <div className="space-y-4 py-2">
           <div className="space-y-1.5">
             <Label>Employee</Label>
-            <Select value={employeeId} onValueChange={setEmployeeId} disabled={loadingOpts}>
-              <SelectTrigger>
-                <SelectValue placeholder={loadingOpts ? "Loading…" : "Select employee"} />
-              </SelectTrigger>
-              <SelectContent>
-                {employees.map((e) => (
-                  <SelectItem key={e.id} value={e.id}>
-                    {e.fullName} ({e.employeeCode})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Combobox
+              options={employees.map((e) => ({ value: e.id, label: `${e.fullName} (${e.employeeCode})` }))}
+              value={employeeId}
+              onChange={setEmployeeId}
+              placeholder={loadingOpts ? "Loading…" : "Select employee"}
+              searchPlaceholder="Search employees…"
+              disabled={loadingOpts}
+            />
           </div>
 
           <div className="space-y-1.5">
@@ -522,6 +557,16 @@ function InitiateDialog({ open, onOpenChange, onInitiated }: InitiateDialogProps
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <ConfirmDialog
+      open={confirmOpen}
+      onOpenChange={setConfirmOpen}
+      title="Discard changes?"
+      description="You have unsaved changes in this form. Are you sure you want to cancel? Your changes will be lost."
+      confirmLabel="Discard"
+      cancelLabel="Keep Editing"
+      onConfirm={confirmDiscard}
+    />
+    </>
   )
 }
 

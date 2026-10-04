@@ -1,25 +1,29 @@
 package com.hrms.payroll.service.impl;
 
-import com.hrms.attendance.service.AttendanceService;
+import com.hrms.attendance.service.AttendanceDayLedgerService;
 import com.hrms.common.dto.PageableResponse;
 import com.hrms.common.exception.BusinessException;
 import com.hrms.common.exception.ResourceNotFoundException;
 import com.hrms.employee.entity.Employee;
-import com.hrms.employee.enums.EmploymentStatus;
 import com.hrms.employee.repository.EmployeeRepository;
 import com.hrms.payroll.dto.InitiatePayrollRunRequest;
 import com.hrms.payroll.dto.PayrollRunResponse;
 import com.hrms.payroll.dto.PayslipResponse;
 import com.hrms.payroll.entity.Payslip;
+import com.hrms.payroll.entity.PayslipComponent;
 import com.hrms.payroll.entity.PayrollRun;
 import com.hrms.payroll.entity.SalaryStructure;
+import com.hrms.payroll.entity.SalaryStructureComponent;
 import com.hrms.payroll.entity.TdsDeclaration;
 import com.hrms.payroll.enums.PayrollRunStatus;
 import com.hrms.payroll.enums.TaxRegime;
 import com.hrms.payroll.mapper.PayrollRunMapper;
+import com.hrms.payroll.mapper.PayslipComponentMapper;
 import com.hrms.payroll.mapper.PayslipMapper;
 import com.hrms.payroll.repository.PayrollRunRepository;
+import com.hrms.payroll.repository.PayslipComponentRepository;
 import com.hrms.payroll.repository.PayslipRepository;
+import com.hrms.payroll.repository.SalaryStructureComponentRepository;
 import com.hrms.payroll.repository.SalaryStructureRepository;
 import com.hrms.payroll.repository.TdsDeclarationRepository;
 import com.hrms.payroll.service.PayrollRunService;
@@ -56,16 +60,19 @@ public class PayrollRunServiceImpl implements PayrollRunService {
     private static final BigDecimal PT_THRESHOLD    = new BigDecimal("10000");
     private static final BigDecimal PT_AMOUNT       = new BigDecimal("200.00");
 
-    private final PayrollRunRepository       payrollRunRepository;
-    private final PayslipRepository          payslipRepository;
-    private final SalaryStructureRepository  salaryStructureRepository;
-    private final EmployeeRepository         employeeRepository;
-    private final TdsDeclarationRepository   tdsDeclarationRepository;
-    private final PayrollRunMapper           payrollRunMapper;
-    private final PayslipMapper              payslipMapper;
-    private final TaxCalculator              taxCalculator;
-    private final PayslipPdfService          payslipPdfService;
-    private final AttendanceService          attendanceService;
+    private final PayrollRunRepository                payrollRunRepository;
+    private final PayslipRepository                   payslipRepository;
+    private final PayslipComponentRepository          payslipComponentRepository;
+    private final SalaryStructureRepository           salaryStructureRepository;
+    private final SalaryStructureComponentRepository  salaryStructureComponentRepository;
+    private final EmployeeRepository                  employeeRepository;
+    private final TdsDeclarationRepository            tdsDeclarationRepository;
+    private final PayrollRunMapper                    payrollRunMapper;
+    private final PayslipMapper                       payslipMapper;
+    private final PayslipComponentMapper              payslipComponentMapper;
+    private final TaxCalculator                       taxCalculator;
+    private final PayslipPdfService                   payslipPdfService;
+    private final AttendanceDayLedgerService          attendanceDayLedgerService;
 
     @Override
     public PayrollRunResponse initiate(InitiatePayrollRunRequest request, UUID processedBy) {
@@ -97,8 +104,9 @@ public class PayrollRunServiceImpl implements PayrollRunService {
             throw new BusinessException("Payroll run can only be processed from DRAFT status");
         }
 
-        List<Employee> activeEmployees = employeeRepository.findAll().stream()
-                .filter(e -> EmploymentStatus.ACTIVE.equals(e.getEmploymentStatus()))
+        LocalDate runMonth = LocalDate.of(run.getYear(), run.getMonth(), 1);
+        List<Employee> eligibleEmployees = employeeRepository.findAll().stream()
+                .filter(e -> isEmployedDuringMonth(e, runMonth))
                 .toList();
 
         BigDecimal totalGross      = BigDecimal.ZERO;
@@ -106,7 +114,7 @@ public class PayrollRunServiceImpl implements PayrollRunService {
         BigDecimal totalNet        = BigDecimal.ZERO;
         int processedCount = 0;
 
-        for (Employee employee : activeEmployees) {
+        for (Employee employee : eligibleEmployees) {
             Payslip payslip = processEmployeeForRun(employee, run);
             if (payslip == null) continue;
             totalGross      = totalGross.add(nvl(payslip.getGrossSalary()));
@@ -131,6 +139,11 @@ public class PayrollRunServiceImpl implements PayrollRunService {
     public PayslipResponse generatePayslipForEmployee(UUID employeeId, int month, int year, UUID requestedBy) {
         Employee employee = employeeRepository.findById(employeeId)
                 .orElseThrow(() -> new ResourceNotFoundException("Employee", "id", employeeId.toString()));
+
+        if (payslipRepository.findByEmployeeIdAndYearAndMonth(employeeId, year, month).isPresent()) {
+            throw new BusinessException("Payslip already generated for " + employee.getFirstName()
+                    + " " + employee.getLastName() + " for " + monthLabel(month, year) + ".");
+        }
 
         // Find or create a DRAFT run for this period
         PayrollRun run = payrollRunRepository.findByYearAndMonth(year, month)
@@ -177,7 +190,7 @@ public class PayrollRunServiceImpl implements PayrollRunService {
         payrollRunRepository.save(run);
 
         log.info("Generated and published payslip for employee {} in run {}", employeeId, run.getId());
-        return payslipMapper.toResponse(payslip);
+        return toResponseWithComponents(payslip);
     }
 
     @Override
@@ -274,47 +287,54 @@ public class PayrollRunServiceImpl implements PayrollRunService {
         SalaryStructure structure = active.get(0);
         BigDecimal monthlyGross = nvl(structure.getGrossSalary());
 
-        // ── Day-count: joining-month gets partial range ───────────────────────
-        LocalDate joinDate = employee.getJoiningDate();
-        int totalDaysInMonth;
-        if (joinDate != null
-                && joinDate.getYear() == run.getYear()
-                && joinDate.getMonthValue() == run.getMonth()) {
-            totalDaysInMonth = (int) (monthEnd.toEpochDay() - joinDate.toEpochDay() + 1);
-        } else {
-            totalDaysInMonth = runMonth.lengthOfMonth();
-        }
+        // ── Day-count: the ratio's divisor is ALWAYS the full calendar month —
+        //    never shrunk for a joiner/leaver, or proration collapses to a no-op. ──
+        int totalDaysInMonth = runMonth.lengthOfMonth();
 
-        // ── LOP days from attendance ──────────────────────────────────────────
-        int lopDays = 0;
-        try {
-            var summary = attendanceService.getMonthlySummary(
-                    employee.getId(), run.getYear(), run.getMonth());
-            lopDays = Math.min(summary.getAbsentDays(), totalDaysInMonth);
-        } catch (Exception ex) {
-            log.debug("No attendance summary for employee {} in {}/{}, defaulting lop=0",
-                    employee.getId(), run.getYear(), run.getMonth());
-        }
+        // ── Employed window within this month: starts late if hired mid-month,
+        //    ends early if resigned/relieved mid-month. Days outside this window are
+        //    simply unpaid (they weren't employed then) — that's what drives the
+        //    proration. Days *inside* the window are further reduced by LOP
+        //    (absences / unpaid-leave halves) from the attendance day ledger. ──
+        LocalDate joinDate       = employee.getJoiningDate();
+        LocalDate resignDate     = employee.getResignationDate();
+        LocalDate rangeStart     = (joinDate != null && joinDate.isAfter(runMonth)) ? joinDate : runMonth;
+        LocalDate rangeEnd       = (resignDate != null && resignDate.isBefore(monthEnd)) ? resignDate : monthEnd;
+        int employedDays = rangeEnd.isBefore(rangeStart)
+                ? 0
+                : (int) (rangeEnd.toEpochDay() - rangeStart.toEpochDay() + 1);
 
-        int paidDays = Math.max(0, totalDaysInMonth - lopDays);
-        BigDecimal ratio = BigDecimal.valueOf(paidDays)
+        BigDecimal lopDays = employedDays == 0
+                ? BigDecimal.ZERO
+                : attendanceDayLedgerService
+                        .getLopDays(employee.getId(), rangeStart, rangeEnd)
+                        .min(BigDecimal.valueOf(employedDays));
+
+        BigDecimal paidDays = BigDecimal.valueOf(employedDays).subtract(lopDays).max(BigDecimal.ZERO);
+        BigDecimal ratio = paidDays
                 .divide(BigDecimal.valueOf(totalDaysInMonth), 6, RoundingMode.HALF_UP);
 
-        // ── Pro-rate all earnings ─────────────────────────────────────────────
-        BigDecimal grossPay   = monthlyGross.multiply(ratio).setScale(2, RoundingMode.HALF_UP);
-        BigDecimal basic      = proRate(nvl(structure.getBasic()),            ratio);
-        BigDecimal hra        = proRate(nvl(structure.getHra()),              ratio);
-        BigDecimal da         = proRate(nvl(structure.getDa()),               ratio);
-        BigDecimal conveyance = proRate(nvl(structure.getConveyance()),       ratio);
-        BigDecimal medical    = proRate(nvl(structure.getMedicalAllowance()), ratio);
-        BigDecimal special    = proRate(nvl(structure.getSpecialAllowance()), ratio);
+        // ── Pro-rate all earning components (open-ended, whatever's on the structure) ──
+        BigDecimal grossPay = monthlyGross.multiply(ratio).setScale(2, RoundingMode.HALF_UP);
+        List<SalaryStructureComponent> structureComponents = salaryStructureComponentRepository
+                .findBySalaryStructureId(structure.getId());
+
+        List<ProratedComponent> proratedComponents = structureComponents.stream()
+                .map(sc -> new ProratedComponent(sc.getPayrollComponent(), proRate(nvl(sc.getComputedAmount()), ratio)))
+                .toList();
+
+        BigDecimal basic = proratedComponents.stream()
+                .filter(pc -> "BASIC".equals(pc.component().getCode()))
+                .findFirst()
+                .map(ProratedComponent::amount)
+                .orElse(BigDecimal.ZERO);
 
         // ── LOP amount ────────────────────────────────────────────────────────
         BigDecimal lopAmount = BigDecimal.ZERO;
-        if (lopDays > 0) {
+        if (lopDays.compareTo(BigDecimal.ZERO) > 0) {
             BigDecimal dailyRate = monthlyGross
                     .divide(BigDecimal.valueOf(totalDaysInMonth), 2, RoundingMode.HALF_UP);
-            lopAmount = dailyRate.multiply(BigDecimal.valueOf(lopDays)).setScale(2, RoundingMode.HALF_UP);
+            lopAmount = dailyRate.multiply(lopDays).setScale(2, RoundingMode.HALF_UP);
         }
 
         // ── PF (12% of pro-rated basic, capped at ₹1,800) ────────────────────
@@ -363,13 +383,6 @@ public class PayrollRunServiceImpl implements PayrollRunService {
         payslip.setYear(run.getYear());
         payslip.setMonth(run.getMonth());
 
-        payslip.setBasic(basic);
-        payslip.setHra(hra);
-        payslip.setDa(da);
-        payslip.setConveyance(conveyance);
-        payslip.setMedicalAllowance(medical);
-        payslip.setSpecialAllowance(special);
-        payslip.setOtherEarnings(BigDecimal.ZERO);
         payslip.setGrossSalary(grossPay);
 
         payslip.setPfDeduction(pfAmt);
@@ -381,14 +394,36 @@ public class PayrollRunServiceImpl implements PayrollRunService {
         payslip.setOtherDeductions(BigDecimal.ZERO);
         payslip.setTotalDeductions(totalDed);
 
-        payslip.setLopDays(BigDecimal.valueOf(lopDays));
+        payslip.setLopDays(lopDays);
         payslip.setLopAmount(lopAmount);
         payslip.setNetSalary(netPay);
         payslip.setWorkingDays(totalDaysInMonth);
-        payslip.setPaidDays(BigDecimal.valueOf(paidDays));
+        payslip.setPaidDays(paidDays);
         payslip.setPublished(false);
 
-        return payslipRepository.save(payslip);
+        payslip = payslipRepository.save(payslip);
+
+        payslipComponentRepository.deleteByPayslipId(payslip.getId());
+        Payslip savedPayslip = payslip;
+        List<PayslipComponent> componentRows = proratedComponents.stream()
+                .map(pc -> PayslipComponent.builder()
+                        .payslip(savedPayslip)
+                        .payrollComponent(pc.component())
+                        .amount(pc.amount())
+                        .build())
+                .toList();
+        payslipComponentRepository.saveAll(componentRows);
+
+        return payslip;
+    }
+
+    private record ProratedComponent(com.hrms.payroll.entity.PayrollComponent component, BigDecimal amount) {}
+
+    private PayslipResponse toResponseWithComponents(Payslip payslip) {
+        PayslipResponse response = payslipMapper.toResponse(payslip);
+        response.setComponents(payslipComponentMapper.toResponseList(
+                payslipComponentRepository.findByPayslipId(payslip.getId())));
+        return response;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -404,5 +439,24 @@ public class PayrollRunServiceImpl implements PayrollRunService {
 
     private static BigDecimal nvl(BigDecimal v) {
         return v != null ? v : BigDecimal.ZERO;
+    }
+
+    private static String monthLabel(int month, int year) {
+        return java.time.Month.of(month).getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.ENGLISH)
+                + " " + year;
+    }
+
+    /**
+     * ACTIVE employees are always included. INACTIVE employees (soft-deleted/terminated)
+     * are still included for the month they actually left in (or a still-future exit
+     * date) so their final, prorated payslip gets generated — only employees who already
+     * left in a prior month are excluded.
+     */
+    private static boolean isEmployedDuringMonth(Employee employee, LocalDate runMonth) {
+        return switch (employee.getEmploymentStatus()) {
+            case ACTIVE -> true;
+            case INACTIVE -> employee.getResignationDate() == null
+                    || !employee.getResignationDate().isBefore(runMonth);
+        };
     }
 }

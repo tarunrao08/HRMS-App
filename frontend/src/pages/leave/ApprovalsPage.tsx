@@ -17,6 +17,9 @@ import { useAuthStore } from "@/store/authStore"
 import leaveService from "@/services/leaveService"
 import { toastApiError } from "@/services/api"
 import type { LeaveRequest } from "@/services/leaveService"
+import ConfirmDialog from "@/components/shared/ConfirmDialog"
+import { useFormSnapshot } from "@/hooks/useFormSnapshot"
+import { useConfirmClose } from "@/hooks/useConfirmClose"
 
 // ── Reject Dialog ─────────────────────────────────────────────────────────────
 
@@ -32,6 +35,9 @@ function RejectDialog({ open, requestId, onClose, onSuccess }: RejectDialogProps
   const [submitting, setSubmitting]   = useState(false)
 
   function handleClose() { setComments(""); onClose() }
+
+  const { isDirty } = useFormSnapshot(open, comments)
+  const { confirmOpen, setConfirmOpen, requestClose, confirmDiscard } = useConfirmClose(handleClose)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -50,7 +56,8 @@ function RejectDialog({ open, requestId, onClose, onSuccess }: RejectDialogProps
   }
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
+    <>
+    <Dialog open={open} onOpenChange={(o) => { if (!o) requestClose(isDirty()) }}>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader><DialogTitle>Reject Leave Request</DialogTitle></DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4 mt-2">
@@ -60,7 +67,7 @@ function RejectDialog({ open, requestId, onClose, onSuccess }: RejectDialogProps
               onChange={(e) => setComments(e.target.value)} rows={3} required />
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={handleClose} disabled={submitting}>Cancel</Button>
+            <Button type="button" variant="outline" onClick={() => requestClose(isDirty())} disabled={submitting}>Cancel</Button>
             <Button type="submit" variant="destructive" disabled={submitting}>
               {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Reject
@@ -69,6 +76,16 @@ function RejectDialog({ open, requestId, onClose, onSuccess }: RejectDialogProps
         </form>
       </DialogContent>
     </Dialog>
+    <ConfirmDialog
+      open={confirmOpen}
+      onOpenChange={setConfirmOpen}
+      title="Discard changes?"
+      description="You have unsaved changes in this form. Are you sure you want to cancel? Your changes will be lost."
+      confirmLabel="Discard"
+      cancelLabel="Keep Editing"
+      onConfirm={confirmDiscard}
+    />
+    </>
   )
 }
 

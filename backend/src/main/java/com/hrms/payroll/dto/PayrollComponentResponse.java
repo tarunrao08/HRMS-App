@@ -19,7 +19,8 @@ public class PayrollComponentResponse {
     private ComponentType componentType;
     private CalculationType calculationType;
     private BigDecimal value;
-    private String percentageOf;
+    private UUID percentageOfComponentId;
+    private String percentageOfComponentCode;
     private boolean taxable;
     private boolean active;
     private int displayOrder;

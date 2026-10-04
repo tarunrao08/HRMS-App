@@ -12,5 +12,11 @@ export async function loginAsAdmin(page: Page): Promise<void> {
 }
 
 export async function clearAuthStorage(page: Page): Promise<void> {
-  await page.evaluate(() => localStorage.removeItem("hrms-auth"))
+  // On a fresh/blank page (no navigation yet) the document has an opaque origin and
+  // localStorage access throws a SecurityError — there's nothing to clear there anyway.
+  try {
+    await page.evaluate(() => localStorage.removeItem("hrms-auth"))
+  } catch {
+    // ignore
+  }
 }

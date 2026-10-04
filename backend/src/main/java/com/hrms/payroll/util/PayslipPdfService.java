@@ -2,6 +2,9 @@ package com.hrms.payroll.util;
 
 import com.hrms.employee.entity.Employee;
 import com.hrms.payroll.entity.Payslip;
+import com.hrms.payroll.entity.PayslipComponent;
+import com.hrms.payroll.enums.ComponentType;
+import com.hrms.payroll.repository.PayslipComponentRepository;
 import com.itextpdf.kernel.colors.ColorConstants;
 import com.itextpdf.kernel.colors.DeviceRgb;
 import com.itextpdf.kernel.font.PdfFont;
@@ -18,6 +21,7 @@ import com.itextpdf.layout.element.Table;
 import com.itextpdf.layout.properties.TextAlignment;
 import com.itextpdf.layout.properties.UnitValue;
 import com.itextpdf.io.font.constants.StandardFonts;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -29,10 +33,15 @@ import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Comparator;
+import java.util.List;
 
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class PayslipPdfService {
+
+    private final PayslipComponentRepository payslipComponentRepository;
 
     private static final String[] MONTH_NAMES = {
         "January","February","March","April","May","June",
@@ -116,14 +125,15 @@ public class PayslipPdfService {
         twoCol.addCell(sectionHeader("EARNINGS", bold));
         twoCol.addCell(sectionHeader("DEDUCTIONS", bold));
 
-        // Earnings body
+        // Earnings body — dynamic, whatever components were configured on the salary structure
         Table earn = new Table(UnitValue.createPercentArray(new float[]{60, 40})).useAllAvailableWidth();
-        earningRow(earn, "Basic",               payslip.getBasic(),            regular);
-        earningRow(earn, "HRA",                 payslip.getHra(),              regular);
-        earningRow(earn, "Dearness Allowance",  payslip.getDa(),               regular);
-        earningRow(earn, "Conveyance",          payslip.getConveyance(),       regular);
-        earningRow(earn, "Medical Allowance",   payslip.getMedicalAllowance(), regular);
-        earningRow(earn, "Special Allowance",   payslip.getSpecialAllowance(), regular);
+        List<PayslipComponent> components = payslipComponentRepository.findByPayslipId(payslip.getId()).stream()
+                .filter(pc -> pc.getPayrollComponent().getComponentType() == ComponentType.EARNING)
+                .sorted(Comparator.comparingInt(pc -> pc.getPayrollComponent().getDisplayOrder()))
+                .toList();
+        for (PayslipComponent pc : components) {
+            earningRow(earn, pc.getPayrollComponent().getName(), pc.getAmount(), regular);
+        }
         twoCol.addCell(new Cell().add(earn).setBorder(Border.NO_BORDER).setPadding(0));
 
         // Deductions body

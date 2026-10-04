@@ -1,5 +1,6 @@
 package com.hrms.leave.dto;
 
+import com.hrms.employee.enums.Gender;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
@@ -31,4 +32,9 @@ public class LeaveTypeRequest {
     private int minNoticeDays;
 
     private boolean active = true;
+
+    private boolean tenureBased;
+
+    /** Null = applicable to every employee; set to restrict (e.g. Maternity Leave -> FEMALE). */
+    private Gender applicableGender;
 }

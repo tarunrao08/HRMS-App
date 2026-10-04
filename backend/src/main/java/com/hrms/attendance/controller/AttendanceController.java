@@ -131,4 +131,11 @@ public class AttendanceController {
             @PathVariable UUID employeeId) {
         return ResponseEntity.ok(ApiResponse.success(attendanceService.getEmployeeShifts(employeeId)));
     }
+
+    @PostMapping("/admin/run-auto-absent-check")
+    @PreAuthorize("hasRole('HR_ADMIN')")
+    public ResponseEntity<ApiResponse<Integer>> runAutoAbsentCheck() {
+        int count = attendanceService.runAutoAbsentCheck();
+        return ResponseEntity.ok(ApiResponse.success(count + " employee(s) marked absent", count));
+    }
 }

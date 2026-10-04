@@ -13,4 +13,6 @@ public interface PayrollComponentRepository extends JpaRepository<PayrollCompone
     boolean existsByCode(String code);
 
     List<PayrollComponent> findByActiveTrueOrderByDisplayOrderAsc();
+
+    List<PayrollComponent> findByPercentageOfComponentId(UUID id);
 }

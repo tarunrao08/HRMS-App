@@ -132,6 +132,13 @@
             <version>${itext.version}</version>
         </dependency>
 
+        <!-- ── swagger-ui ───────────────────────────────────────────────── -->
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <version>2.5.0</version>
+        </dependency>
+
         <!-- ── Testing ───────────────────────────────────────────────── -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

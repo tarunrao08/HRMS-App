@@ -40,15 +40,36 @@ export interface LeaveRequest {
   currentApprovalLevel: number
   rejectionReason?: string
   cancelledAt?: string
+  l1Status?: "PENDING" | "APPROVED" | "REJECTED" | null
+  l2Status?: "PENDING" | "APPROVED" | "REJECTED" | null
 }
+
+export type HalfDayType = "FIRST_HALF" | "SECOND_HALF"
 
 export interface ApplyLeaveRequest {
   leaveTypeId: string
   startDate: string
   endDate: string
   halfDay?: boolean
+  halfDayType?: HalfDayType
   reason: string
   documentUrl?: string
+}
+
+export interface AdjustLeaveBalanceRequest {
+  leaveTypeId: string
+  year: number
+  days: number
+  reason: string
+}
+
+export interface LeaveBalanceAdjustment {
+  id: string
+  leaveBalanceId: string
+  days: number
+  reason: string
+  adjustedByName: string
+  createdAt: string
 }
 
 const leaveService = {
@@ -86,6 +107,18 @@ const leaveService = {
 
   getAllRequests(params: { employeeId?: string; status?: string; page?: number; size?: number } = {}) {
     return api.get<PageableResponse<LeaveRequest>>("/leave/requests", { params })
+  },
+
+  getBalancesForEmployee(employeeId: string, year: number) {
+    return api.get<LeaveBalance[]>(`/leave/balances/${employeeId}`, { params: { year } })
+  },
+
+  adjustBalance(employeeId: string, data: AdjustLeaveBalanceRequest) {
+    return api.patch<LeaveBalance>(`/leave/balances/${employeeId}/adjust`, data)
+  },
+
+  getAdjustmentHistory(employeeId: string, leaveTypeId: string, year: number) {
+    return api.get<LeaveBalanceAdjustment[]>(`/leave/balances/${employeeId}/adjustments`, { params: { leaveTypeId, year } })
   },
 }
 

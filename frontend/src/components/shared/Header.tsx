@@ -16,6 +16,9 @@ import {
   DialogFooter,
   DialogClose,
 } from "@/components/ui/dialog"
+import ConfirmDialog from "@/components/shared/ConfirmDialog"
+import { useFormSnapshot } from "@/hooks/useFormSnapshot"
+import { useConfirmClose } from "@/hooks/useConfirmClose"
 
 // ── Change Password Dialog ────────────────────────────────────────────────────
 
@@ -38,6 +41,10 @@ function ChangePasswordDialog({
       setConfirmPassword("")
     }
   }, [open])
+
+  const { isDirty } = useFormSnapshot(open, { currentPassword, newPassword, confirmPassword })
+  const { confirmOpen, setConfirmOpen, requestClose, confirmDiscard } =
+    useConfirmClose(() => onOpenChange(false))
 
   async function handleSubmit() {
     if (!currentPassword || !newPassword || !confirmPassword) {
@@ -65,7 +72,8 @@ function ChangePasswordDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+    <Dialog open={open} onOpenChange={(next) => { if (next) onOpenChange(true); else requestClose(isDirty()) }}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
           <DialogTitle>Change Password</DialogTitle>
@@ -116,6 +124,16 @@ function ChangePasswordDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <ConfirmDialog
+      open={confirmOpen}
+      onOpenChange={setConfirmOpen}
+      title="Discard changes?"
+      description="You have unsaved changes in this form. Are you sure you want to cancel? Your changes will be lost."
+      confirmLabel="Discard"
+      cancelLabel="Keep Editing"
+      onConfirm={confirmDiscard}
+    />
+    </>
   )
 }
 

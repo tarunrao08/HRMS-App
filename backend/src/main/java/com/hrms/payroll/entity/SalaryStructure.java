@@ -33,29 +33,8 @@ public class SalaryStructure extends BaseEntity {
     @Column(name = "ctc", nullable = false, precision = 14, scale = 2)
     private BigDecimal ctc;
 
-    @Column(name = "basic", nullable = false, precision = 14, scale = 2)
-    private BigDecimal basic;
-
-    @Column(name = "hra", precision = 14, scale = 2)
-    private BigDecimal hra;
-
-    @Column(name = "da", precision = 14, scale = 2)
-    private BigDecimal da;
-
-    @Column(name = "conveyance", precision = 14, scale = 2)
-    private BigDecimal conveyance;
-
-    @Column(name = "special_allowance", precision = 14, scale = 2)
-    private BigDecimal specialAllowance;
-
-    @Column(name = "medical_allowance", precision = 14, scale = 2)
-    private BigDecimal medicalAllowance;
-
-    @Column(name = "transport_allowance", precision = 14, scale = 2)
-    private BigDecimal transportAllowance;
-
-    @Column(name = "lta", precision = 14, scale = 2)
-    private BigDecimal lta;
+    // Earning breakdown (Basic, HRA, DA, ...) lives in SalaryStructureComponent rows —
+    // an open-ended, catalog-driven list instead of fixed columns here.
 
     @Column(name = "pf_applicable")
     private boolean pfApplicable;

@@ -1,6 +1,7 @@
 package com.hrms.leave.dto;
 
 import com.hrms.leave.enums.HalfDayType;
+import com.hrms.leave.enums.LeaveApprovalStatus;
 import com.hrms.leave.enums.LeaveRequestStatus;
 import lombok.Data;
 
@@ -34,4 +35,8 @@ public class LeaveRequestResponse {
     private String rejectionReason;
     private Instant cancelledAt;
     private Instant createdAt;
+
+    /** Null when this request's chain has no such level (e.g. a single-level chain shows null here). */
+    private LeaveApprovalStatus l1Status;
+    private LeaveApprovalStatus l2Status;
 }

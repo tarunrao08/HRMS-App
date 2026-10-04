@@ -14,6 +14,7 @@ import com.hrms.leave.enums.LeaveApprovalAction;
 import com.hrms.leave.enums.LeaveApprovalStatus;
 import com.hrms.leave.enums.LeaveRequestStatus;
 import com.hrms.leave.event.LeaveApprovedEvent;
+import com.hrms.leave.event.LeaveCancelledEvent;
 import com.hrms.leave.mapper.LeaveMapper;
 import com.hrms.leave.repository.*;
 import com.hrms.leave.service.LeaveRequestService;
@@ -21,9 +22,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,7 +33,9 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -74,7 +75,10 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
 
         List<LeaveRequest> overlapping = leaveRequestRepository.findOverlapping(
                 employeeId, req.getStartDate(), req.getEndDate());
-        if (!overlapping.isEmpty()) {
+        List<LeaveRequest> conflicting = overlapping.stream()
+                .filter(existing -> !isComplementaryHalfDay(existing, req))
+                .toList();
+        if (!conflicting.isEmpty()) {
             throw new ValidationException(
                     "You already have a pending or approved leave overlapping the requested dates");
         }
@@ -119,6 +123,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         leaveRequest = leaveRequestRepository.save(leaveRequest);
 
         List<Employee> chain = buildApprovalChain(employee);
+        List<LeaveApproval> createdApprovals = new ArrayList<>();
         for (int i = 0; i < chain.size(); i++) {
             LeaveApproval approval = LeaveApproval.builder()
                     .leaveRequest(leaveRequest)
@@ -126,12 +131,14 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
                     .approverLevel(i + 1)
                     .status(LeaveApprovalStatus.PENDING)
                     .build();
-            leaveApprovalRepository.save(approval);
+            createdApprovals.add(leaveApprovalRepository.save(approval));
         }
 
         log.info("Leave request {} submitted by employee {} for {} workdays of {}",
                 leaveRequest.getId(), employeeId, totalDays, leaveType.getCode());
-        return leaveMapper.toRequestResponse(leaveRequest);
+        LeaveRequestResponse response = leaveMapper.toRequestResponse(leaveRequest);
+        attachLevelStatuses(response, createdApprovals);
+        return response;
     }
 
     // ── Item 7: Approval workflow ─────────────────────────────────────────────
@@ -139,29 +146,22 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
     @Override
     @Transactional(readOnly = true)
     public List<LeaveRequestResponse> getPendingApprovals(UUID approverId) {
-        return leaveApprovalRepository.findPendingLeaveRequestsForApprover(approverId)
-                .stream()
-                .map(leaveMapper::toRequestResponse)
-                .toList();
+        return mapWithLevelStatuses(leaveApprovalRepository.findPendingLeaveRequestsForApprover(approverId));
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<LeaveRequestResponse> getPendingForManager(UUID managerId) {
-        return leaveRequestRepository.findPendingForManager(managerId)
-                .stream()
-                .map(leaveMapper::toRequestResponse)
-                .toList();
+        return mapWithLevelStatuses(leaveRequestRepository.findPendingForManager(managerId));
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<LeaveRequestResponse> getPendingApprovalsForHrAdmin() {
-        var pageable = PageRequest.of(0, 500, Sort.by("appliedAt").descending());
-        return leaveRequestRepository.findByStatus(LeaveRequestStatus.PENDING, pageable)
-                .stream()
-                .map(leaveMapper::toRequestResponse)
-                .toList();
+        // Level-aware: only surfaces requests where it's actually HR Admin's turn
+        // (currentApprovalLevel matches an HR-Admin-held PENDING approval row) —
+        // NOT every PENDING request regardless of level.
+        return mapWithLevelStatuses(leaveApprovalRepository.findPendingLeaveRequestsForHrAdminRole());
     }
 
     @Override
@@ -200,7 +200,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
                 leaveRequest.setCurrentApprovalLevel(nextLevel);
                 leaveRequest = leaveRequestRepository.save(leaveRequest);
                 log.info("Leave request {} forwarded to approval level {}", requestId, nextLevel);
-                return leaveMapper.toRequestResponse(leaveRequest);
+                return toResponseWithLevels(leaveRequest);
             }
         } else if (approverId != null) {
             // No chain record — allow if this user is the employee's direct manager
@@ -229,10 +229,12 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         eventPublisher.publishEvent(new LeaveApprovedEvent(
                 leaveRequest.getEmployee().getId(),
                 leaveRequest.getStartDate(),
-                leaveRequest.getEndDate()));
+                leaveRequest.getEndDate(),
+                leaveRequest.isHalfDay(),
+                leaveRequest.getHalfDayType()));
         log.info("Leave request {} fully approved", requestId);
 
-        return leaveMapper.toRequestResponse(leaveRequest);
+        return toResponseWithLevels(leaveRequest);
     }
 
     @Override
@@ -287,7 +289,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         leaveRequest.setRejectionReason(req != null ? req.getComments() : null);
         leaveRequest = leaveRequestRepository.save(leaveRequest);
         log.info("Leave request {} rejected at level {}", requestId, leaveRequest.getCurrentApprovalLevel());
-        return leaveMapper.toRequestResponse(leaveRequest);
+        return toResponseWithLevels(leaveRequest);
     }
 
     @Override
@@ -322,7 +324,15 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         leaveRequest.setCancelledBy(cancelledByUserId);
         leaveRequest = leaveRequestRepository.save(leaveRequest);
         log.info("Leave request {} cancelled by user {}", requestId, cancelledByUserId);
-        return leaveMapper.toRequestResponse(leaveRequest);
+
+        if (isApprovedFuture) {
+            eventPublisher.publishEvent(new LeaveCancelledEvent(
+                    leaveRequest.getEmployee().getId(),
+                    leaveRequest.getStartDate(),
+                    leaveRequest.getEndDate()));
+        }
+
+        return toResponseWithLevels(leaveRequest);
     }
 
     // ── Item 6 / 8: Paginated queries ─────────────────────────────────────────
@@ -333,7 +343,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         Page<LeaveRequest> page = status != null
                 ? leaveRequestRepository.findByEmployeeIdAndStatus(employeeId, status, pageable)
                 : leaveRequestRepository.findByEmployeeId(employeeId, pageable);
-        return PageableResponse.of(page.map(leaveMapper::toRequestResponse));
+        return mapPageWithLevelStatuses(page);
     }
 
     @Override
@@ -349,10 +359,78 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         } else {
             page = leaveRequestRepository.findAll(pageable);
         }
-        return PageableResponse.of(page.map(leaveMapper::toRequestResponse));
+        return mapPageWithLevelStatuses(page);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /**
+     * Derives l1Status/l2Status from a request's approval rows. A single-level chain
+     * (applicant is themself a Manager/HR Admin, or has no manager) is shown under L2 —
+     * that one level is effectively the HR-level decision — leaving L1 as "—" (null).
+     */
+    private void attachLevelStatuses(LeaveRequestResponse response, List<LeaveApproval> approvals) {
+        if (approvals.size() == 1) {
+            response.setL1Status(null);
+            response.setL2Status(approvals.get(0).getStatus());
+            return;
+        }
+        for (LeaveApproval approval : approvals) {
+            if (approval.getApproverLevel() == 1) response.setL1Status(approval.getStatus());
+            if (approval.getApproverLevel() == 2) response.setL2Status(approval.getStatus());
+        }
+    }
+
+    private Map<UUID, List<LeaveApproval>> groupApprovalsByRequest(List<UUID> leaveRequestIds) {
+        if (leaveRequestIds.isEmpty()) return Map.of();
+        return leaveApprovalRepository.findByLeaveRequestIdIn(leaveRequestIds).stream()
+                .collect(Collectors.groupingBy(a -> a.getLeaveRequest().getId()));
+    }
+
+    private List<LeaveRequestResponse> mapWithLevelStatuses(List<LeaveRequest> requests) {
+        Map<UUID, List<LeaveApproval>> approvalsByRequest =
+                groupApprovalsByRequest(requests.stream().map(LeaveRequest::getId).toList());
+        return requests.stream()
+                .map(lr -> {
+                    LeaveRequestResponse response = leaveMapper.toRequestResponse(lr);
+                    attachLevelStatuses(response, approvalsByRequest.getOrDefault(lr.getId(), List.of()));
+                    return response;
+                })
+                .toList();
+    }
+
+    private PageableResponse<LeaveRequestResponse> mapPageWithLevelStatuses(Page<LeaveRequest> page) {
+        Map<UUID, List<LeaveApproval>> approvalsByRequest =
+                groupApprovalsByRequest(page.getContent().stream().map(LeaveRequest::getId).toList());
+        return PageableResponse.of(page.map(lr -> {
+            LeaveRequestResponse response = leaveMapper.toRequestResponse(lr);
+            attachLevelStatuses(response, approvalsByRequest.getOrDefault(lr.getId(), List.of()));
+            return response;
+        }));
+    }
+
+    private LeaveRequestResponse toResponseWithLevels(LeaveRequest leaveRequest) {
+        LeaveRequestResponse response = leaveMapper.toRequestResponse(leaveRequest);
+        attachLevelStatuses(response,
+                leaveApprovalRepository.findByLeaveRequestIdOrderByApproverLevelAsc(leaveRequest.getId()));
+        return response;
+    }
+
+    /**
+     * A new half-day request doesn't conflict with an existing single-day half-day request
+     * on the same date when they cover opposite halves (e.g. FIRST_HALF Casual Leave +
+     * SECOND_HALF Loss of Pay) — together they span the day without overlapping.
+     */
+    private boolean isComplementaryHalfDay(LeaveRequest existing, ApplyLeaveRequest req) {
+        return req.isHalfDay()
+                && existing.isHalfDay()
+                && req.getStartDate().equals(req.getEndDate())
+                && existing.getStartDate().equals(existing.getEndDate())
+                && existing.getStartDate().equals(req.getStartDate())
+                && existing.getHalfDayType() != null
+                && req.getHalfDayType() != null
+                && existing.getHalfDayType() != req.getHalfDayType();
+    }
 
     private BigDecimal countWorkdays(LocalDate start, LocalDate end, boolean halfDay) {
         if (halfDay) {

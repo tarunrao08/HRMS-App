@@ -3,7 +3,9 @@ package com.hrms.employee.repository;
 import com.hrms.employee.entity.Employee;
 import com.hrms.employee.enums.EmploymentStatus;
 import com.hrms.employee.enums.EmploymentType;
+import jakarta.persistence.criteria.Order;
 import jakarta.persistence.criteria.Predicate;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 
 import java.util.ArrayList;
@@ -17,6 +19,19 @@ public class EmployeeSpecification {
     public static Specification<Employee> filter(String search, UUID departmentId, UUID designationId,
                                                   UUID branchId, UUID managerId,
                                                   EmploymentStatus status, EmploymentType type) {
+        return filter(search, departmentId, designationId, branchId, managerId, status, type, Sort.Direction.ASC);
+    }
+
+    /**
+     * Same filtering as above, plus a case-insensitive name ordering (LOWER(firstName), LOWER(lastName)).
+     * Ordering is applied here - rather than via Pageable's Sort - because Sort only supports plain
+     * property paths and can't express LOWER(...). The caller must pass an unsorted Pageable, otherwise
+     * Spring Data would overwrite this ordering with a plain (case-sensitive) one.
+     */
+    public static Specification<Employee> filter(String search, UUID departmentId, UUID designationId,
+                                                  UUID branchId, UUID managerId,
+                                                  EmploymentStatus status, EmploymentType type,
+                                                  Sort.Direction direction) {
         return (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
 
@@ -49,6 +64,17 @@ public class EmployeeSpecification {
             }
             if (type != null) {
                 predicates.add(cb.equal(root.get("employmentType"), type));
+            }
+
+            // Skip ordering on the count(*) query Spring Data issues for pagination totals.
+            if (query != null && query.getResultType() != Long.class && query.getResultType() != long.class) {
+                Order firstNameOrder = direction == Sort.Direction.DESC
+                        ? cb.desc(cb.lower(root.get("firstName")))
+                        : cb.asc(cb.lower(root.get("firstName")));
+                Order lastNameOrder = direction == Sort.Direction.DESC
+                        ? cb.desc(cb.lower(root.get("lastName")))
+                        : cb.asc(cb.lower(root.get("lastName")));
+                query.orderBy(List.of(firstNameOrder, lastNameOrder));
             }
 
             return cb.and(predicates.toArray(new Predicate[0]));

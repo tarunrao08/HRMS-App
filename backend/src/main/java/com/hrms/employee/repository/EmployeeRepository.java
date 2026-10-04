@@ -17,6 +17,11 @@ public interface EmployeeRepository extends JpaRepository<Employee, UUID>, JpaSp
     boolean existsByEmailAndIdNot(String email, UUID id);
     List<Employee> findByManagerId(UUID managerId);
 
+    long countByDepartmentId(UUID departmentId);
+    long countByDesignationId(UUID designationId);
+    long countByBranchId(UUID branchId);
+    long countByBranchIdAndDepartmentId(UUID branchId, UUID departmentId);
+
     List<Employee> findByEmploymentStatusOrderByFirstNameAscLastNameAsc(EmploymentStatus status);
 
     @Query("SELECT MAX(e.employeeCode) FROM Employee e WHERE e.employeeCode LIKE 'EMP%'")

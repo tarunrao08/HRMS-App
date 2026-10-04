@@ -1,10 +1,12 @@
 package com.hrms.leave.mapper;
 
 import com.hrms.leave.dto.LeaveApprovalResponse;
+import com.hrms.leave.dto.LeaveBalanceAdjustmentResponse;
 import com.hrms.leave.dto.LeaveBalanceResponse;
 import com.hrms.leave.dto.LeaveRequestResponse;
 import com.hrms.leave.entity.LeaveApproval;
 import com.hrms.leave.entity.LeaveBalance;
+import com.hrms.leave.entity.LeaveBalanceAdjustment;
 import com.hrms.leave.entity.LeaveRequest;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
@@ -37,4 +39,9 @@ public interface LeaveMapper {
     @Mapping(target = "approverName",
              expression = "java(approval.getApprover().getFirstName() + ' ' + approval.getApprover().getLastName())")
     LeaveApprovalResponse toApprovalResponse(LeaveApproval approval);
+
+    @Mapping(source = "leaveBalance.id", target = "leaveBalanceId")
+    @Mapping(target = "adjustedByName",
+             expression = "java(adjustment.getAdjustedBy().getFirstName() + ' ' + adjustment.getAdjustedBy().getLastName())")
+    LeaveBalanceAdjustmentResponse toAdjustmentResponse(LeaveBalanceAdjustment adjustment);
 }

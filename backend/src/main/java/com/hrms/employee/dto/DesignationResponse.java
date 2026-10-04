@@ -12,6 +12,7 @@ public class DesignationResponse {
     private String description;
     private UUID departmentId;
     private String departmentName;
+    private boolean managerial;
     private Instant createdAt;
     private Instant updatedAt;
 }

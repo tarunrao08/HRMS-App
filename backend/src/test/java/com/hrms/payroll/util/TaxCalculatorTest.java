@@ -1,20 +1,22 @@
 package com.hrms.payroll.util;
 
+import com.hrms.payroll.enums.TaxRegime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * TDS calculation under the simplified new-tax-regime:
- *   - ₹0 – ₹12,00,000 annual taxable → 0% tax
- *   - Above ₹12,00,000              → 10% on the excess
+ * TDS calculation under the new tax regime (no declaration), FY 2024-25 slabs:
+ *   Std. deduction ₹75,000; slabs 0-3L 0%, 3-7L 5%, 7-10L 10%, 10-12L 15%, 12-15L 20%, 15L+ 30%;
+ *   87A rebate → ₹0 tax if taxable income ≤ ₹7,00,000; 4% Health & Education Cess on top.
  *
- * Financial year: 1 March → last day of February.
+ * Financial year: 1 April → 31 March (see FinancialYearUtil.getIndianFyStart/End).
  */
 class TaxCalculatorTest {
 
@@ -25,69 +27,73 @@ class TaxCalculatorTest {
         taxCalculator = new TaxCalculator();
     }
 
-    // ── Test 1: Full-year employee, gross > 12L annually ─────────────────────
-    // Joining date is before the FY; FY start (March) is the effective start.
-    // monthlyGross = ₹1,20,000  →  annual = ₹14,40,000  →  excess = ₹2,40,000
-    // annualTax = ₹24,000  →  monthlyTds = ₹2,000.00
+    // ── Test 1: Full-year employee, taxable income crosses into the 5%/10% slabs ─
+    // Joining date is before the FY; FY start (April) is the effective start → 12 months.
+    // monthlyGross = ₹80,000 → annual = ₹9,60,000 → taxable = ₹8,85,000 (after ₹75,000 std. deduction)
+    // slab tax = 400,000×5% + 185,000×10% = ₹38,500 → +4% cess = ₹40,040 → monthlyTds = ₹3,336.67
     @Test
-    @DisplayName("Full-year employee with annual income above ₹12L pays 10% on excess")
-    void fullYear_incomeAbove12L_returnsCorrectMonthlyTds() {
-        BigDecimal monthlyGross = new BigDecimal("120000");
+    @DisplayName("Full-year employee with taxable income in the 5%/10% slabs pays cess-inclusive TDS")
+    void fullYear_incomeInMiddleSlabs_returnsCorrectMonthlyTds() {
+        BigDecimal monthlyGross = new BigDecimal("80000");
         LocalDate joiningDate   = LocalDate.of(2023, 1, 10);   // well before FY
-        LocalDate payrollMonth  = LocalDate.of(2024, 3, 1);     // first month of FY 2024-25
+        LocalDate payrollMonth  = LocalDate.of(2024, 4, 1);     // first month of FY 2024-25
 
-        BigDecimal result = taxCalculator.calculateMonthlyTds(monthlyGross, joiningDate, payrollMonth);
+        BigDecimal result = taxCalculator.calculateMonthlyTds(
+                monthlyGross, joiningDate, payrollMonth, TaxRegime.NEW, Optional.empty());
 
-        assertThat(result).isEqualByComparingTo(new BigDecimal("2000.00"));
+        assertThat(result).isEqualByComparingTo(new BigDecimal("3336.67"));
     }
 
-    // ── Test 2: Full-year employee, gross <= 12L annually ────────────────────
-    // monthlyGross = ₹90,000  →  annual = ₹10,80,000  ≤  ₹12,00,000  →  tax = 0
+    // ── Test 2: Full-year employee, taxable income at or below the ₹7L 87A rebate ─
+    // monthlyGross = ₹50,000 → annual = ₹6,00,000 → taxable = ₹5,25,000 ≤ ₹7,00,000 → tax = 0
     @Test
-    @DisplayName("Full-year employee with annual income at or below ₹12L pays no TDS")
-    void fullYear_incomeBelow12L_returnsZero() {
-        BigDecimal monthlyGross = new BigDecimal("90000");
+    @DisplayName("Full-year employee with taxable income at or below the 87A rebate limit pays no TDS")
+    void fullYear_incomeAtOrBelowRebateLimit_returnsZero() {
+        BigDecimal monthlyGross = new BigDecimal("50000");
         LocalDate joiningDate   = LocalDate.of(2023, 1, 10);
-        LocalDate payrollMonth  = LocalDate.of(2024, 3, 1);
+        LocalDate payrollMonth  = LocalDate.of(2024, 4, 1);
 
-        BigDecimal result = taxCalculator.calculateMonthlyTds(monthlyGross, joiningDate, payrollMonth);
+        BigDecimal result = taxCalculator.calculateMonthlyTds(
+                monthlyGross, joiningDate, payrollMonth, TaxRegime.NEW, Optional.empty());
 
         assertThat(result).isEqualByComparingTo(BigDecimal.ZERO);
     }
 
-    // ── Test 3: Mid-FY joiner (December), gross > 12L annually but only ──────
-    //           3 months remain in FY so pro-rated taxable < 12L → tax = 0
+    // ── Test 3: Mid-FY joiner (December), pro-rated taxable income stays under ───
+    //           the rebate limit even though the full-year run rate would exceed it.
     // Joins December 15, 2024; payroll month = December 2024.
-    // Months remaining (Dec → Feb inclusive) = 3
-    // monthlyGross = ₹1,50,000  →  3-month taxable = ₹4,50,000  ≤  ₹12,00,000
+    // Months remaining (Dec → Mar inclusive, FY ends 31 March) = 4
+    // monthlyGross = ₹1,50,000 → 4-month taxable = ₹6,00,000 - ₹75,000 = ₹5,25,000 ≤ ₹7,00,000 → tax = 0
     @Test
-    @DisplayName("Mid-FY December joiner with 3 remaining months pays no TDS even at high salary")
-    void midFY_decemberJoiner_proRatedIncomeBelow12L_returnsZero() {
+    @DisplayName("Mid-FY December joiner with pro-rated income under the rebate limit pays no TDS")
+    void midFY_decemberJoiner_proRatedIncomeUnderRebateLimit_returnsZero() {
         BigDecimal monthlyGross = new BigDecimal("150000");
         LocalDate joiningDate   = LocalDate.of(2024, 12, 15);
         LocalDate payrollMonth  = LocalDate.of(2024, 12, 1);
 
-        BigDecimal result = taxCalculator.calculateMonthlyTds(monthlyGross, joiningDate, payrollMonth);
+        BigDecimal result = taxCalculator.calculateMonthlyTds(
+                monthlyGross, joiningDate, payrollMonth, TaxRegime.NEW, Optional.empty());
 
         assertThat(result).isEqualByComparingTo(BigDecimal.ZERO);
     }
 
-    // ── Test 4: Mid-FY joiner (September), gross high enough that even ────────
-    //           the 6 remaining months exceed 12L → TDS applies
+    // ── Test 4: Mid-FY joiner (September), pro-rated income spans every slab ────
+    //           including the top 30% band → TDS applies.
     // Joins September 15, 2024; payroll month = September 2024.
-    // Months remaining (Sep → Feb inclusive) = 6
-    // monthlyGross = ₹2,50,000  →  6-month taxable = ₹15,00,000
-    // annualTax = (₹15,00,000 - ₹12,00,000) × 10% = ₹30,000
-    // monthlyTds = ₹30,000 / 6 = ₹5,000.00
+    // Months remaining (Sep → Mar inclusive) = 7
+    // monthlyGross = ₹2,50,000 → 7-month gross = ₹17,50,000 → taxable = ₹16,75,000
+    // slab tax = 400,000×5% + 300,000×10% + 200,000×15% + 300,000×20% + 175,000×30% = ₹1,92,500
+    // + 4% cess = ₹2,00,200 → monthlyTds = ₹2,00,200 / 7 = ₹28,600.00
     @Test
-    @DisplayName("Mid-FY September joiner with high salary pays TDS on remaining 6 months")
-    void midFY_septemberJoiner_proRatedIncomeAbove12L_returnsCorrectTds() {
+    @DisplayName("Mid-FY September joiner with high pro-rated income pays TDS across every slab")
+    void midFY_septemberJoiner_proRatedIncomeAcrossAllSlabs_returnsCorrectTds() {
         BigDecimal monthlyGross = new BigDecimal("250000");
         LocalDate joiningDate   = LocalDate.of(2024, 9, 15);
         LocalDate payrollMonth  = LocalDate.of(2024, 9, 1);
 
-        BigDecimal result = taxCalculator.calculateMonthlyTds(monthlyGross, joiningDate, payrollMonth);
+        BigDecimal result = taxCalculator.calculateMonthlyTds(
+                monthlyGross, joiningDate, payrollMonth, TaxRegime.NEW, Optional.empty());
 
-        assertThat(result).isEqualByComparingTo(new BigDecimal("5000.00"));
+        assertThat(result).isEqualByComparingTo(new BigDecimal("28600.00"));
     }
 }

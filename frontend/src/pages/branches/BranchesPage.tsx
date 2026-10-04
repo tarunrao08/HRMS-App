@@ -10,6 +10,8 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import { Badge } from "@/components/ui/badge"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
 } from "@/components/ui/table"
@@ -18,7 +20,10 @@ import {
 } from "@/components/ui/dialog"
 
 import branchService, { BranchResponse } from "@/services/branchService"
+import departmentService, { DepartmentResponse } from "@/services/departmentService"
 import { toastApiError } from "@/services/api"
+import { useFormSnapshot } from "@/hooks/useFormSnapshot"
+import { useConfirmClose } from "@/hooks/useConfirmClose"
 
 interface FormState {
   name: string
@@ -26,12 +31,16 @@ interface FormState {
   state: string
   country: string
   address: string
+  // Departments this branch offers — full replace-all set, same convention as the
+  // employee form's family members/nominees.
+  departmentIds: string[]
 }
 
-const emptyForm: FormState = { name: "", city: "", state: "", country: "", address: "" }
+const emptyForm: FormState = { name: "", city: "", state: "", country: "", address: "", departmentIds: [] }
 
 export default function BranchesPage() {
   const [branches, setBranches] = useState<BranchResponse[]>([])
+  const [departments, setDepartments] = useState<DepartmentResponse[]>([])
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
 
@@ -57,6 +66,13 @@ export default function BranchesPage() {
 
   useEffect(() => { fetchBranches() }, [])
 
+  useEffect(() => {
+    departmentService.getAll().then((r) => {
+      const data = (r.data as any).data ?? r.data
+      setDepartments(Array.isArray(data) ? data : [])
+    }).catch(() => setDepartments([]))
+  }, [])
+
   function openAdd() {
     setEditTarget(null)
     setForm(emptyForm)
@@ -71,16 +87,30 @@ export default function BranchesPage() {
       state: branch.state,
       country: branch.country,
       address: branch.address ?? "",
+      departmentIds: (branch.departments ?? []).map((d) => d.id),
     })
     setDialogOpen(true)
   }
 
+  function toggleDepartment(id: string, checked: boolean) {
+    setForm((f) => ({
+      ...f,
+      departmentIds: checked
+        ? [...f.departmentIds, id]
+        : f.departmentIds.filter((d) => d !== id),
+    }))
+  }
+
+  const { isDirty } = useFormSnapshot(dialogOpen, form)
+  const { confirmOpen, setConfirmOpen, requestClose, confirmDiscard } = useConfirmClose(() => {
+    setDialogOpen(false)
+    setEditTarget(null)
+    setForm(emptyForm)
+  })
+
   function handleDialogClose(open: boolean) {
-    if (!open && !submitting) {
-      setDialogOpen(false)
-      setEditTarget(null)
-      setForm(emptyForm)
-    }
+    if (open) { setDialogOpen(true); return }
+    if (!submitting) requestClose(isDirty())
   }
 
   function setField(field: keyof FormState) {
@@ -103,6 +133,7 @@ export default function BranchesPage() {
         state: form.state.trim(),
         country: form.country.trim(),
         address: form.address.trim() || undefined,
+        departmentIds: form.departmentIds,
       }
       if (editTarget) {
         await branchService.update(editTarget.id, payload)
@@ -171,13 +202,14 @@ export default function BranchesPage() {
                   <TableHead>City</TableHead>
                   <TableHead>State</TableHead>
                   <TableHead>Country</TableHead>
+                  <TableHead>Departments</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody className={loading ? "opacity-50 pointer-events-none" : ""}>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                    <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
                       Loading…
                     </TableCell>
                   </TableRow>
@@ -188,6 +220,17 @@ export default function BranchesPage() {
                       <TableCell>{branch.city}</TableCell>
                       <TableCell>{branch.state}</TableCell>
                       <TableCell>{branch.country}</TableCell>
+                      <TableCell>
+                        {(branch.departments ?? []).length === 0 ? (
+                          <span className="text-sm text-muted-foreground">None assigned</span>
+                        ) : (
+                          <div className="flex flex-wrap gap-1">
+                            {(branch.departments ?? []).map((d) => (
+                              <Badge key={d.id} variant="secondary">{d.name}</Badge>
+                            ))}
+                          </div>
+                        )}
+                      </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
                           <Button
@@ -286,6 +329,29 @@ export default function BranchesPage() {
                 disabled={submitting}
               />
             </div>
+            <div className="space-y-1.5">
+              <Label>Departments offered by this branch</Label>
+              {departments.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No departments exist yet — add one on the Departments page first.</p>
+              ) : (
+                <div className="max-h-48 overflow-y-auto rounded-md border p-2 space-y-1.5">
+                  {departments.map((d) => (
+                    <div key={d.id} className="flex items-center gap-2">
+                      <Checkbox
+                        id={`branch-dept-${d.id}`}
+                        checked={form.departmentIds.includes(d.id)}
+                        onCheckedChange={(checked) => toggleDepartment(d.id, checked === true)}
+                        disabled={submitting}
+                      />
+                      <Label htmlFor={`branch-dept-${d.id}`} className="font-normal">{d.name}</Label>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">
+                Only the departments checked here will be selectable when creating an employee at this branch.
+              </p>
+            </div>
             <DialogFooter>
               <Button
                 type="button"
@@ -302,6 +368,17 @@ export default function BranchesPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Cancel Confirm */}
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title="Discard changes?"
+        description="You have unsaved changes in this form. Are you sure you want to cancel? Your changes will be lost."
+        confirmLabel="Discard"
+        cancelLabel="Keep Editing"
+        onConfirm={confirmDiscard}
+      />
 
       {/* Delete Confirm Dialog */}
       <ConfirmDialog

@@ -18,4 +18,6 @@ public class DesignationRequest {
     private UUID departmentId;
 
     private String description;
+
+    private boolean managerial;
 }

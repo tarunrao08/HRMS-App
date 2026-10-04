@@ -4,9 +4,13 @@ import com.hrms.common.exception.ResourceNotFoundException;
 import com.hrms.common.exception.ValidationException;
 import com.hrms.leave.dto.LeaveTypeRequest;
 import com.hrms.leave.dto.LeaveTypeResponse;
+import com.hrms.leave.dto.LeaveTypeTenureTierRequest;
+import com.hrms.leave.dto.LeaveTypeTenureTierResponse;
 import com.hrms.leave.entity.LeaveType;
+import com.hrms.leave.entity.LeaveTypeTenureTier;
 import com.hrms.leave.mapper.LeaveTypeMapper;
 import com.hrms.leave.repository.LeaveTypeRepository;
+import com.hrms.leave.repository.LeaveTypeTenureTierRepository;
 import com.hrms.leave.service.LeaveTypeService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -21,8 +25,9 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class LeaveTypeServiceImpl implements LeaveTypeService {
 
-    private final LeaveTypeRepository leaveTypeRepository;
-    private final LeaveTypeMapper     leaveTypeMapper;
+    private final LeaveTypeRepository           leaveTypeRepository;
+    private final LeaveTypeTenureTierRepository leaveTypeTenureTierRepository;
+    private final LeaveTypeMapper               leaveTypeMapper;
 
     @Override
     @Transactional
@@ -88,6 +93,89 @@ public class LeaveTypeServiceImpl implements LeaveTypeService {
         LeaveType leaveType = findOrThrow(id);
         leaveTypeRepository.delete(leaveType);
         log.info("Deleted leave type: {} ({})", leaveType.getName(), leaveType.getCode());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<LeaveTypeTenureTierResponse> getTiers(UUID leaveTypeId) {
+        findOrThrow(leaveTypeId);
+        return leaveTypeTenureTierRepository.findByLeaveTypeIdOrderByMinYearsAsc(leaveTypeId).stream()
+                .map(leaveTypeMapper::toTierResponse)
+                .toList();
+    }
+
+    @Override
+    @Transactional
+    public LeaveTypeTenureTierResponse addTier(UUID leaveTypeId, LeaveTypeTenureTierRequest request) {
+        LeaveType leaveType = findOrThrow(leaveTypeId);
+        validateTierRequest(request);
+
+        List<LeaveTypeTenureTier> existing = leaveTypeTenureTierRepository.findByLeaveTypeIdOrderByMinYearsAsc(leaveTypeId);
+        rejectIfOverlapping(existing, request, null);
+
+        LeaveTypeTenureTier tier = LeaveTypeTenureTier.builder()
+                .leaveType(leaveType)
+                .minYears(request.getMinYears())
+                .maxYears(request.getMaxYears())
+                .days(request.getDays())
+                .build();
+        tier = leaveTypeTenureTierRepository.save(tier);
+        log.info("Added tenure tier to {}: {}-{} years -> {} days",
+                leaveType.getCode(), request.getMinYears(), request.getMaxYears(), request.getDays());
+        return leaveTypeMapper.toTierResponse(tier);
+    }
+
+    @Override
+    @Transactional
+    public LeaveTypeTenureTierResponse updateTier(UUID leaveTypeId, UUID tierId, LeaveTypeTenureTierRequest request) {
+        findOrThrow(leaveTypeId);
+        validateTierRequest(request);
+
+        LeaveTypeTenureTier tier = leaveTypeTenureTierRepository.findById(tierId)
+                .filter(t -> t.getLeaveType().getId().equals(leaveTypeId))
+                .orElseThrow(() -> new ResourceNotFoundException("LeaveTypeTenureTier", "id", tierId.toString()));
+
+        List<LeaveTypeTenureTier> existing = leaveTypeTenureTierRepository.findByLeaveTypeIdOrderByMinYearsAsc(leaveTypeId);
+        rejectIfOverlapping(existing, request, tierId);
+
+        tier.setMinYears(request.getMinYears());
+        tier.setMaxYears(request.getMaxYears());
+        tier.setDays(request.getDays());
+        tier = leaveTypeTenureTierRepository.save(tier);
+        return leaveTypeMapper.toTierResponse(tier);
+    }
+
+    @Override
+    @Transactional
+    public void deleteTier(UUID leaveTypeId, UUID tierId) {
+        findOrThrow(leaveTypeId);
+        LeaveTypeTenureTier tier = leaveTypeTenureTierRepository.findById(tierId)
+                .filter(t -> t.getLeaveType().getId().equals(leaveTypeId))
+                .orElseThrow(() -> new ResourceNotFoundException("LeaveTypeTenureTier", "id", tierId.toString()));
+        leaveTypeTenureTierRepository.delete(tier);
+    }
+
+    private void validateTierRequest(LeaveTypeTenureTierRequest request) {
+        if (request.getMaxYears() != null && request.getMaxYears() <= request.getMinYears()) {
+            throw new ValidationException("Max years must be greater than min years (or left empty for unbounded)");
+        }
+    }
+
+    private void rejectIfOverlapping(List<LeaveTypeTenureTier> existing, LeaveTypeTenureTierRequest request, UUID excludeTierId) {
+        int newMin = request.getMinYears();
+        int newMax = request.getMaxYears() != null ? request.getMaxYears() : Integer.MAX_VALUE;
+
+        for (LeaveTypeTenureTier tier : existing) {
+            if (excludeTierId != null && tier.getId().equals(excludeTierId)) continue;
+            int otherMin = tier.getMinYears();
+            int otherMax = tier.getMaxYears() != null ? tier.getMaxYears() : Integer.MAX_VALUE;
+            boolean overlaps = newMin < otherMax && otherMin < newMax;
+            if (overlaps) {
+                throw new ValidationException(String.format(
+                        "This range overlaps an existing tier (%d–%s years)",
+                        tier.getMinYears(), tier.getMaxYears() == null ? "∞" : tier.getMaxYears()));
+            }
+        }
     }
 
     private LeaveType findOrThrow(UUID id) {

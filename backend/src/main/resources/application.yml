@@ -37,8 +37,6 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         format_sql: true
-        jdbc:
-          time_zone: UTC
         order_inserts: true
         order_updates: true
         batch_size: 25
@@ -129,6 +127,16 @@ payroll:
 leave:
   rollover:
     cron: "0 5 0 1 1 ?"   # Jan 1 at 00:05 (Quartz format: s m h dom mon dow)
+
+# ── Attendance Module ────────────────────────────────────────────────────
+# Auto-absent check fires once per shift's cutoff (start time + grace period) instead of
+# polling on an interval. Update these if a shift's start time or grace period changes.
+attendance:
+  auto-absent:
+    cron:
+      general-shift:   "0 30 9 * * MON-FRI"   # General Shift   09:00 + 30 min grace
+      afternoon-shift: "0 30 14 * * MON-FRI"  # Afternoon Shift 14:00 + 30 min grace
+      night-shift:     "0 30 22 * * MON-FRI"  # Night Shift     22:00 + 30 min grace
 
 # ── Logging ───────────────────────────────────────────────────────────────
 logging:

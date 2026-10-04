@@ -45,7 +45,7 @@ export interface PageableResponse<T> {
 
 // ── Employee ─────────────────────────────────────────────────────────────────
 
-export type EmploymentStatus = "ACTIVE" | "INACTIVE" | "RESIGNED" | "TERMINATED"
+export type EmploymentStatus = "ACTIVE" | "INACTIVE"
 export type EmploymentType   = "FULL_TIME" | "PART_TIME" | "CONTRACT" | "INTERN"
 export type Gender           = "MALE" | "FEMALE" | "OTHER"
 

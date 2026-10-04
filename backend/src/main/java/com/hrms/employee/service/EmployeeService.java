@@ -8,6 +8,7 @@ import com.hrms.employee.dto.EmployeeSummaryResponse;
 import com.hrms.employee.enums.EmploymentStatus;
 import com.hrms.employee.enums.EmploymentType;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 
 import java.util.List;
 import java.util.UUID;
@@ -19,6 +20,7 @@ public interface EmployeeService {
     PageableResponse<EmployeeSummaryResponse> search(String search, UUID departmentId, UUID designationId,
                                                       UUID branchId, UUID managerId,
                                                       EmploymentStatus status, EmploymentType type,
+                                                      Sort.Direction nameSortDirection,
                                                       Pageable pageable);
     EmployeeResponse update(UUID id, EmployeeRequest request);
     void deactivate(UUID id);

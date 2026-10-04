@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -16,6 +17,8 @@ import java.util.UUID;
 public interface LeaveApprovalRepository extends JpaRepository<LeaveApproval, UUID> {
 
     List<LeaveApproval> findByLeaveRequestIdOrderByApproverLevelAsc(UUID leaveRequestId);
+
+    List<LeaveApproval> findByLeaveRequestIdIn(Collection<UUID> leaveRequestIds);
 
     Optional<LeaveApproval> findByLeaveRequestIdAndApproverLevel(UUID leaveRequestId, int approverLevel);
 

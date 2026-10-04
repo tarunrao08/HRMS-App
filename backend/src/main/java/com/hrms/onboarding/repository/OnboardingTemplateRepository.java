@@ -14,4 +14,7 @@ public interface OnboardingTemplateRepository extends JpaRepository<OnboardingTe
     boolean existsByNameIgnoreCase(String name);
 
     List<OnboardingTemplate> findByActiveTrueOrderByNameAsc();
+
+    long countByDepartmentId(UUID departmentId);
+    long countByDesignationId(UUID designationId);
 }

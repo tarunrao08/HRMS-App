@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react"
+import React, { useEffect, useMemo, useState } from "react"
 import toast from "react-hot-toast"
 import { Plus, ShieldCheck } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -15,11 +15,15 @@ import {
 import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from "@/components/ui/select"
+import { Combobox } from "@/components/ui/combobox"
 import PageHeader from "@/components/shared/PageHeader"
 import EmptyState from "@/components/shared/EmptyState"
+import ConfirmDialog from "@/components/shared/ConfirmDialog"
 import userService, { type UserAccount } from "@/services/userService"
 import employeeService from "@/services/employeeService"
 import { toastApiError } from "@/services/api"
+import { useFormSnapshot } from "@/hooks/useFormSnapshot"
+import { useConfirmClose } from "@/hooks/useConfirmClose"
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -51,9 +55,10 @@ interface CreateDialogProps {
   open: boolean
   onOpenChange: (v: boolean) => void
   onCreated: (u: UserAccount) => void
+  existingEmployeeIds: Set<string>
 }
 
-function CreateAccountDialog({ open, onOpenChange, onCreated }: CreateDialogProps) {
+function CreateAccountDialog({ open, onOpenChange, onCreated, existingEmployeeIds }: CreateDialogProps) {
   const [employees, setEmployees]   = useState<EmployeeSummary[]>([])
   const [employeeId, setEmployeeId] = useState("")
   const [username, setUsername]     = useState("")
@@ -68,17 +73,22 @@ function CreateAccountDialog({ open, onOpenChange, onCreated }: CreateDialogProp
     employeeService.getSummaries()
       .then((r) => {
         const data = (r.data as any)?.data ?? r.data
-        setEmployees(Array.isArray(data) ? data : [])
+        const list: EmployeeSummary[] = Array.isArray(data) ? data : []
+        setEmployees(list.filter((e) => !existingEmployeeIds.has(e.id)))
       })
       .catch(() => setEmployees([]))
       .finally(() => setLoadingEmps(false))
-  }, [open])
+  }, [open, existingEmployeeIds])
 
   useEffect(() => {
     if (!open) {
       setEmployeeId(""); setUsername(""); setPassword(""); setRole("ROLE_EMPLOYEE")
     }
   }, [open])
+
+  const { isDirty } = useFormSnapshot(open, { employeeId, username, password, role })
+  const { confirmOpen, setConfirmOpen, requestClose, confirmDiscard } =
+    useConfirmClose(() => onOpenChange(false))
 
   function handleEmployeeChange(id: string) {
     setEmployeeId(id)
@@ -108,7 +118,8 @@ function CreateAccountDialog({ open, onOpenChange, onCreated }: CreateDialogProp
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+    <Dialog open={open} onOpenChange={(next) => { if (next) onOpenChange(true); else requestClose(isDirty()) }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>Create Login Account</DialogTitle>
@@ -117,18 +128,15 @@ function CreateAccountDialog({ open, onOpenChange, onCreated }: CreateDialogProp
         <div className="space-y-4 py-1">
           <div className="space-y-1.5">
             <Label>Employee <span className="text-destructive">*</span></Label>
-            <Select value={employeeId} onValueChange={handleEmployeeChange} disabled={loadingEmps}>
-              <SelectTrigger>
-                <SelectValue placeholder={loadingEmps ? "Loading…" : "Select employee"} />
-              </SelectTrigger>
-              <SelectContent>
-                {employees.map((e) => (
-                  <SelectItem key={e.id} value={e.id}>
-                    {e.fullName} ({e.employeeCode})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Combobox
+              options={employees.map((e) => ({ value: e.id, label: `${e.fullName} (${e.employeeCode})` }))}
+              value={employeeId}
+              onChange={handleEmployeeChange}
+              placeholder={loadingEmps ? "Loading…" : "Select employee"}
+              searchPlaceholder="Search employees…"
+              emptyText="No employees without an account found."
+              disabled={loadingEmps}
+            />
           </div>
 
           <div className="space-y-1.5">
@@ -179,6 +187,16 @@ function CreateAccountDialog({ open, onOpenChange, onCreated }: CreateDialogProp
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <ConfirmDialog
+      open={confirmOpen}
+      onOpenChange={setConfirmOpen}
+      title="Discard changes?"
+      description="You have unsaved changes in this form. Are you sure you want to cancel? Your changes will be lost."
+      confirmLabel="Discard"
+      cancelLabel="Keep Editing"
+      onConfirm={confirmDiscard}
+    />
+    </>
   )
 }
 
@@ -201,6 +219,11 @@ export default function UserAccountsPage() {
   }
 
   useEffect(() => { loadUsers() }, [])
+
+  const existingEmployeeIds = useMemo(
+    () => new Set(users.map((u) => u.employeeId).filter((id): id is string => Boolean(id))),
+    [users]
+  )
 
   return (
     <div className="space-y-4">
@@ -299,6 +322,7 @@ export default function UserAccountsPage() {
         open={showCreate}
         onOpenChange={setShowCreate}
         onCreated={(u) => setUsers((prev) => [u, ...prev])}
+        existingEmployeeIds={existingEmployeeIds}
       />
     </div>
   )

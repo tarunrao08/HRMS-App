@@ -1,4 +1,7 @@
--- Departments, designations, branches, and the core employees table with all audit fields
+-- Departments, designations, branches, and the core employees table with all audit fields.
+-- Master data (departments/designations/branches) uses ON DELETE RESTRICT everywhere it is
+-- referenced: deleting one while employees, designations, or onboarding templates still
+-- reference it must fail loudly rather than silently orphaning rows.
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 CREATE TABLE departments (
@@ -12,14 +15,24 @@ CREATE TABLE departments (
 );
 
 CREATE TABLE designations (
-    id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    title       VARCHAR(100) NOT NULL UNIQUE,
-    description TEXT,
-    created_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    updated_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    created_by  VARCHAR(100),
-    updated_by  VARCHAR(100)
+    id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name          VARCHAR(100) NOT NULL,
+    description   TEXT,
+    department_id UUID REFERENCES departments(id) ON DELETE RESTRICT,
+    is_managerial BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at    TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    created_by    VARCHAR(100),
+    updated_by    VARCHAR(100)
 );
+
+-- A designation name only needs to be unique within its department; department-less
+-- designations are not constrained against each other.
+CREATE UNIQUE INDEX uq_designation_name_department
+    ON designations (LOWER(name), department_id)
+    WHERE department_id IS NOT NULL;
+
+CREATE INDEX idx_designations_department_id ON designations(department_id);
 
 CREATE TABLE branches (
     id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -52,10 +65,10 @@ CREATE TABLE employees (
     resignation_date          DATE,
     employment_status         VARCHAR(20)  NOT NULL DEFAULT 'ACTIVE',
     employment_type           VARCHAR(20)  NOT NULL DEFAULT 'FULL_TIME',
-    department_id             UUID REFERENCES departments(id) ON DELETE SET NULL,
-    designation_id            UUID REFERENCES designations(id) ON DELETE SET NULL,
-    branch_id                 UUID REFERENCES branches(id) ON DELETE SET NULL,
-    manager_id                UUID REFERENCES employees(id) ON DELETE SET NULL,
+    department_id             UUID REFERENCES departments(id)  ON DELETE RESTRICT,
+    designation_id            UUID REFERENCES designations(id) ON DELETE RESTRICT,
+    branch_id                 UUID REFERENCES branches(id)     ON DELETE RESTRICT,
+    manager_id                UUID REFERENCES employees(id)    ON DELETE SET NULL,
     profile_picture_url       TEXT,
     pan_number                VARCHAR(10),
     aadhar_number             VARCHAR(12),

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useNavigate } from "react-router-dom"
 import api from "@/services/api"
+import attendanceService, { type TodayAttendanceRow } from "@/services/attendanceService"
 import payrollService from "@/services/payrollService"
 import type { Payslip } from "@/services/payrollService"
 import onboardingService, { type OnboardingWorkflow, type OnboardingTask } from "@/services/onboardingService"
@@ -28,14 +29,6 @@ function formatIndianCurrency(amount: number): string {
     maximumFractionDigits: 0,
   }).format(amount)
   return `₹${formatted}`
-}
-
-function getTodayString(): string {
-  const d = new Date()
-  const year = d.getFullYear()
-  const month = String(d.getMonth() + 1).padStart(2, "0")
-  const day = String(d.getDate()).padStart(2, "0")
-  return `${year}-${month}-${day}`
 }
 
 // ─── Onboarding Checklist Card ────────────────────────────────────────────────
@@ -132,10 +125,8 @@ export default function DashboardPage() {
   const [onboardingLoading, setOnboardingLoading]   = useState(false)
 
   useEffect(() => {
-    const today = getTodayString()
-
     const p1 = api.get("/employees", { params: { size: 1 } })
-    const p2 = api.get("/attendance", { params: { date: today, status: "PRESENT", size: 1 } })
+    const p2 = attendanceService.getTodayAttendance()
     const p3 = isHrAdmin
       ? api.get("/leave/requests", { params: { status: "PENDING", size: 1 } })
       : api.get("/leave/requests/me", { params: { status: "PENDING", size: 1 } })
@@ -153,8 +144,10 @@ export default function DashboardPage() {
       }
 
       if (r2.status === "fulfilled") {
-        const total = r2.value.data?.totalElements ?? r2.value.data?.data?.totalElements ?? "—"
-        setPresentToday({ loading: false, value: String(total) })
+        const rows: TodayAttendanceRow[] = (r2.value.data as any)?.data ?? r2.value.data ?? []
+        const WORKED_STATUSES = new Set(["PRESENT", "LATE", "WORK_FROM_HOME", "REGULARIZED"])
+        const count = rows.filter((row) => WORKED_STATUSES.has(row.status ?? "")).length
+        setPresentToday({ loading: false, value: String(count) })
       } else {
         setPresentToday({ loading: false, value: "—" })
       }

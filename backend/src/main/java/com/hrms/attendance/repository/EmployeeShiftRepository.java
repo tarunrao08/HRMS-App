@@ -22,4 +22,12 @@ public interface EmployeeShiftRepository extends JpaRepository<EmployeeShift, UU
            "ORDER BY es.effectiveFrom DESC")
     List<EmployeeShift> findActiveShiftForEmployee(@Param("employeeId") UUID employeeId,
                                                    @Param("date") LocalDate date);
+
+    @Query("SELECT es FROM EmployeeShift es " +
+           "WHERE es.employee.id IN :employeeIds " +
+           "AND es.effectiveFrom <= :date " +
+           "AND (es.effectiveTo IS NULL OR es.effectiveTo >= :date) " +
+           "ORDER BY es.effectiveFrom DESC")
+    List<EmployeeShift> findActiveShiftsForEmployees(@Param("employeeIds") List<UUID> employeeIds,
+                                                      @Param("date") LocalDate date);
 }

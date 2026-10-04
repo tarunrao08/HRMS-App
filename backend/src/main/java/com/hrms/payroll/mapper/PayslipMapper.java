@@ -13,5 +13,6 @@ public interface PayslipMapper {
     @Mapping(source = "employee.employeeCode", target = "employeeCode")
     @Mapping(expression = "java(payslip.getEmployee().getFirstName() + \" \" + payslip.getEmployee().getLastName())",
              target = "employeeName")
+    @Mapping(target = "components", ignore = true) // populated separately by the service from PayslipComponent rows
     PayslipResponse toResponse(Payslip payslip);
 }

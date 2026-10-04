@@ -1,7 +1,7 @@
 import api from "./api"
 
-export interface DesignationRequest { name: string; departmentId: string; description?: string }
-export interface DesignationResponse { id: string; name: string; departmentId: string; departmentName: string; description?: string; createdAt: string }
+export interface DesignationRequest { name: string; departmentId: string; description?: string; managerial: boolean }
+export interface DesignationResponse { id: string; name: string; departmentId: string; departmentName: string; description?: string; managerial: boolean; createdAt: string }
 
 const designationService = {
   getAll(departmentId?: string) {

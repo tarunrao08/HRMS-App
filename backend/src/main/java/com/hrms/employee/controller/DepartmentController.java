@@ -34,9 +34,10 @@ public class DepartmentController {
     }
 
     @GetMapping
-    @Operation(summary = "List all departments")
-    public ResponseEntity<ApiResponse<List<DepartmentResponse>>> getAll() {
-        return ResponseEntity.ok(ApiResponse.success(departmentService.getAll()));
+    @Operation(summary = "List all departments, optionally filtered to those offered by a branch")
+    public ResponseEntity<ApiResponse<List<DepartmentResponse>>> getAll(
+            @RequestParam(required = false) UUID branchId) {
+        return ResponseEntity.ok(ApiResponse.success(departmentService.getAll(branchId)));
     }
 
     @GetMapping("/{id}")

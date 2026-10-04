@@ -28,4 +28,8 @@ public class Designation extends BaseEntity {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "department_id")
     private Department department;
+
+    @Column(name = "is_managerial", nullable = false)
+    @Builder.Default
+    private boolean managerial = false;
 }

@@ -10,6 +10,8 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Badge } from "@/components/ui/badge"
 import {
   Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
 } from "@/components/ui/table"
@@ -23,14 +25,17 @@ import {
 import designationService, { DesignationResponse } from "@/services/designationService"
 import departmentService, { DepartmentResponse } from "@/services/departmentService"
 import { toastApiError } from "@/services/api"
+import { useFormSnapshot } from "@/hooks/useFormSnapshot"
+import { useConfirmClose } from "@/hooks/useConfirmClose"
 
 interface FormState {
   name: string
   departmentId: string
   description: string
+  managerial: boolean
 }
 
-const emptyForm: FormState = { name: "", departmentId: "", description: "" }
+const emptyForm: FormState = { name: "", departmentId: "", description: "", managerial: false }
 
 export default function DesignationsPage() {
   const [designations, setDesignations] = useState<DesignationResponse[]>([])
@@ -77,16 +82,21 @@ export default function DesignationsPage() {
       name: desig.name,
       departmentId: desig.departmentId,
       description: desig.description ?? "",
+      managerial: desig.managerial,
     })
     setDialogOpen(true)
   }
 
+  const { isDirty } = useFormSnapshot(dialogOpen, form)
+  const { confirmOpen, setConfirmOpen, requestClose, confirmDiscard } = useConfirmClose(() => {
+    setDialogOpen(false)
+    setEditTarget(null)
+    setForm(emptyForm)
+  })
+
   function handleDialogClose(open: boolean) {
-    if (!open && !submitting) {
-      setDialogOpen(false)
-      setEditTarget(null)
-      setForm(emptyForm)
-    }
+    if (open) { setDialogOpen(true); return }
+    if (!submitting) requestClose(isDirty())
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -106,6 +116,7 @@ export default function DesignationsPage() {
           name: form.name.trim(),
           departmentId: form.departmentId,
           description: form.description.trim() || undefined,
+          managerial: form.managerial,
         })
         toast.success("Designation updated successfully.")
       } else {
@@ -113,6 +124,7 @@ export default function DesignationsPage() {
           name: form.name.trim(),
           departmentId: form.departmentId,
           description: form.description.trim() || undefined,
+          managerial: form.managerial,
         })
         toast.success("Designation created successfully.")
       }
@@ -175,6 +187,7 @@ export default function DesignationsPage() {
                   <TableHead>Name</TableHead>
                   <TableHead>Department</TableHead>
                   <TableHead>Description</TableHead>
+                  <TableHead>Managerial</TableHead>
                   <TableHead>Created At</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -182,7 +195,7 @@ export default function DesignationsPage() {
               <TableBody className={loading ? "opacity-50 pointer-events-none" : ""}>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                    <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
                       Loading…
                     </TableCell>
                   </TableRow>
@@ -193,6 +206,11 @@ export default function DesignationsPage() {
                       <TableCell>{desig.departmentName}</TableCell>
                       <TableCell className="text-muted-foreground">
                         {desig.description ?? "—"}
+                      </TableCell>
+                      <TableCell>
+                        {desig.managerial
+                          ? <Badge variant="success">Managerial</Badge>
+                          : <span className="text-muted-foreground">—</span>}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         {new Date(desig.createdAt).toLocaleDateString()}
@@ -278,6 +296,17 @@ export default function DesignationsPage() {
                 disabled={submitting}
               />
             </div>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="desig-managerial"
+                checked={form.managerial}
+                onCheckedChange={(checked) => setForm((f) => ({ ...f, managerial: checked === true }))}
+                disabled={submitting}
+              />
+              <Label htmlFor="desig-managerial">
+                Managerial role (eligible as a Reporting Manager)
+              </Label>
+            </div>
             <DialogFooter>
               <Button
                 type="button"
@@ -294,6 +323,17 @@ export default function DesignationsPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Cancel Confirm */}
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title="Discard changes?"
+        description="You have unsaved changes in this form. Are you sure you want to cancel? Your changes will be lost."
+        confirmLabel="Discard"
+        cancelLabel="Keep Editing"
+        onConfirm={confirmDiscard}
+      />
 
       {/* Delete Confirm Dialog */}
       <ConfirmDialog

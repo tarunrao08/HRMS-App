@@ -1,4 +1,5 @@
--- Shifts, employee shift assignments, daily attendance records, and monthly summary aggregates
+-- Shifts, employee shift assignments, daily attendance records, monthly summary aggregates,
+-- and the per-day/per-half attendance-and-leave ledger.
 CREATE TABLE shifts (
     id                    UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name                  VARCHAR(100) NOT NULL UNIQUE,
@@ -71,9 +72,33 @@ CREATE TABLE attendance_monthly_summary (
     UNIQUE (employee_id, year, month)
 );
 
--- Seed a standard day shift
-INSERT INTO shifts (name, start_time, end_time, grace_period_minutes, working_hours, created_by, updated_by)
-VALUES ('General Shift', '09:00', '18:00', 15, 9.0, 'system', 'system');
+-- Per-day, per-half (AM/PM) attendance-and-leave ledger. Single source of truth for
+-- payroll's paid-days / loss-of-pay computation, reconciled from attendance_records and
+-- leave_requests whenever either changes. attendance_monthly_summary above is kept only
+-- as a read cache for dashboards.
+CREATE TABLE attendance_day_ledger (
+    id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    employee_id      UUID        NOT NULL REFERENCES employees(id)   ON DELETE CASCADE,
+    ledger_date      DATE        NOT NULL,
+    am_category      VARCHAR(20) NOT NULL,
+    am_leave_type_id UUID REFERENCES leave_types(id) ON DELETE SET NULL,
+    pm_category      VARCHAR(20) NOT NULL,
+    pm_leave_type_id UUID REFERENCES leave_types(id) ON DELETE SET NULL,
+    created_at       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    created_by       VARCHAR(100),
+    updated_by       VARCHAR(100),
+    UNIQUE (employee_id, ledger_date)
+);
+
+CREATE INDEX idx_attendance_day_ledger_employee_date ON attendance_day_ledger(employee_id, ledger_date);
+
+-- Seed standard shifts (grace period reflects the auto-absent policy)
+INSERT INTO shifts (name, start_time, end_time, grace_period_minutes, working_hours, is_night_shift, created_by, updated_by)
+VALUES
+    ('General Shift',   '09:00', '18:00', 30, 9.0, FALSE, 'system', 'system'),
+    ('Afternoon Shift', '14:00', '22:00', 30, 8.0, FALSE, 'system', 'system'),
+    ('Night Shift',     '22:00', '06:00', 30, 8.0, TRUE,  'system', 'system');
 
 CREATE INDEX idx_attendance_records_employee_date ON attendance_records(employee_id, attendance_date);
 CREATE INDEX idx_attendance_records_date          ON attendance_records(attendance_date);

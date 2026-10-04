@@ -1,5 +1,6 @@
 package com.hrms.leave.dto;
 
+import com.hrms.employee.enums.Gender;
 import lombok.Data;
 
 import java.time.Instant;
@@ -20,5 +21,7 @@ public class LeaveTypeResponse {
     private boolean requiresDocument;
     private int minNoticeDays;
     private boolean active;
+    private boolean tenureBased;
+    private Gender applicableGender;
     private Instant createdAt;
 }

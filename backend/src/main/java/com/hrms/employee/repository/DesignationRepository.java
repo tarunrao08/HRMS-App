@@ -11,4 +11,5 @@ public interface DesignationRepository extends JpaRepository<Designation, UUID> 
     boolean existsByNameIgnoreCaseAndDepartmentId(String name, UUID departmentId);
     boolean existsByNameIgnoreCaseAndDepartmentIdAndIdNot(String name, UUID departmentId, UUID id);
     List<Designation> findByDepartmentId(UUID departmentId);
+    long countByDepartmentId(UUID departmentId);
 }

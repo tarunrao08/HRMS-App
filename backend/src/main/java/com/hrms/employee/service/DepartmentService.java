@@ -10,6 +10,8 @@ public interface DepartmentService {
     DepartmentResponse create(DepartmentRequest request);
     DepartmentResponse getById(UUID id);
     List<DepartmentResponse> getAll();
+    /** When branchId is given, returns only the departments offered by that branch. */
+    List<DepartmentResponse> getAll(UUID branchId);
     DepartmentResponse update(UUID id, DepartmentRequest request);
     void delete(UUID id);
 }

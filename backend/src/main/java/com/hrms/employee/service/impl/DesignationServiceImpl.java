@@ -9,7 +9,9 @@ import com.hrms.employee.entity.Designation;
 import com.hrms.employee.mapper.DesignationMapper;
 import com.hrms.employee.repository.DepartmentRepository;
 import com.hrms.employee.repository.DesignationRepository;
+import com.hrms.employee.repository.EmployeeRepository;
 import com.hrms.employee.service.DesignationService;
+import com.hrms.onboarding.repository.OnboardingTemplateRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -26,6 +28,8 @@ public class DesignationServiceImpl implements DesignationService {
     private final DesignationRepository designationRepository;
     private final DepartmentRepository  departmentRepository;
     private final DesignationMapper     designationMapper;
+    private final EmployeeRepository    employeeRepository;
+    private final OnboardingTemplateRepository onboardingTemplateRepository;
 
     @Override
     @Transactional
@@ -85,6 +89,18 @@ public class DesignationServiceImpl implements DesignationService {
     @Transactional
     public void delete(UUID id) {
         Designation designation = findOrThrow(id);
+
+        long employeeCount = employeeRepository.countByDesignationId(id);
+        if (employeeCount > 0) {
+            throw new ValidationException("Cannot delete designation '" + designation.getName() + "': "
+                    + employeeCount + " employee(s) are assigned to it");
+        }
+        long templateCount = onboardingTemplateRepository.countByDesignationId(id);
+        if (templateCount > 0) {
+            throw new ValidationException("Cannot delete designation '" + designation.getName() + "': "
+                    + templateCount + " onboarding template(s) reference it");
+        }
+
         designationRepository.delete(designation);
         log.info("Deleted designation: {}", designation.getName());
     }

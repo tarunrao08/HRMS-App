@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react"
+import React, { useEffect, useState, useCallback, useRef } from "react"
 import toast from "react-hot-toast"
 import { ArrowLeft, Plus, FileDown, Wallet, FileText } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -10,6 +10,10 @@ import { Label } from "@/components/ui/label"
 import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from "@/components/ui/select"
+import { Combobox } from "@/components/ui/combobox"
+import ConfirmDialog from "@/components/shared/ConfirmDialog"
+import { useFormSnapshot } from "@/hooks/useFormSnapshot"
+import { useConfirmClose } from "@/hooks/useConfirmClose"
 import {
   Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
 } from "@/components/ui/table"
@@ -20,6 +24,7 @@ import PageHeader from "@/components/shared/PageHeader"
 import EmptyState from "@/components/shared/EmptyState"
 import payrollService, {
   type PayrollRun, type Payslip, type SalaryStructureResponse,
+  type PayrollComponent, type CalculationType, type SalaryStructureComponentInput,
 } from "@/services/payrollService"
 import employeeService from "@/services/employeeService"
 import { toastApiError } from "@/services/api"
@@ -37,6 +42,15 @@ function inr(amount: number | undefined | null): string {
   return "₹" + Number(amount).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
+// Display-only relabels for catalog component names (backend data is unchanged).
+const COMPONENT_DISPLAY_NAMES: Record<string, string> = {
+  "Basic Salary": "Basic",
+}
+
+function displayComponentName(name: string): string {
+  return COMPONENT_DISPLAY_NAMES[name] ?? name
+}
+
 function fmtDate(iso?: string): string {
   if (!iso) return "—"
   return new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
@@ -49,23 +63,123 @@ function runBadge(status: string): "secondary" | "warning" | "success" | "defaul
   return "default"
 }
 
-// ── CTC breakdown preview (pure computation, same as backend) ─────────────────
+// ── CTC breakdown preview (mirrors the two-pass resolution in
+//    SalaryStructureServiceImpl#buildAndSaveStructure on the backend) ─────────
 
-function computeBreakdown(annualCtc: number) {
-  const monthly = annualCtc / 12
-  const basic       = monthly * 0.40
-  const hra         = monthly * 0.20
-  const da          = monthly * 0.10
-  const conveyance  = monthly * 0.10
-  const medical     = monthly * 0.05
-  const special     = monthly - basic - hra - da - conveyance - medical
-  return { monthly, basic, hra, da, conveyance, medical, special }
+interface ComponentRow {
+  payrollComponentId: string
+  code: string
+  name: string
+  calculationType: CalculationType
+  value: number | null
+  percentageOfComponentId?: string | null
+}
+
+const RECONCILE_TOLERANCE = 0.1
+
+function computeBreakdown(annualCtc: number, rows: ComponentRow[]) {
+  const monthlyGross = annualCtc / 12
+  const amounts: Record<string, number> = {}
+  let formulaId: string | null = null
+
+  // Pass 1: FIXED and gross-relative PERCENTAGE
+  for (const r of rows) {
+    if (r.calculationType === "FIXED") {
+      amounts[r.payrollComponentId] = r.value || 0
+    } else if (r.calculationType === "PERCENTAGE") {
+      if (!r.percentageOfComponentId) {
+        amounts[r.payrollComponentId] = monthlyGross * ((r.value || 0) / 100)
+      }
+    } else if (r.calculationType === "FORMULA") {
+      formulaId = r.payrollComponentId
+    }
+  }
+
+  // Pass 2: component-relative PERCENTAGE
+  for (const r of rows) {
+    if (r.calculationType === "PERCENTAGE" && r.percentageOfComponentId) {
+      const ref = amounts[r.percentageOfComponentId]
+      if (ref != null) amounts[r.payrollComponentId] = ref * ((r.value || 0) / 100)
+    }
+  }
+
+  const sumOthers = Object.values(amounts).reduce((a, b) => a + b, 0)
+  if (formulaId) {
+    amounts[formulaId] = Math.max(monthlyGross - sumOthers, 0)
+  }
+
+  const total = Object.values(amounts).reduce((a, b) => a + b, 0)
+  const reconciled = formulaId != null || Math.abs(total - monthlyGross) <= RECONCILE_TOLERANCE
+
+  return { monthlyGross, amounts, total, reconciled }
+}
+
+// PF/ESI/PT constants — mirror SalaryStructureServiceImpl exactly, so the preview matches
+// what the backend will actually save.
+const PF_RATE        = 0.12
+const PF_BASIC_CAP    = 15000
+const PF_MAX_MONTHLY  = 1800
+const ESI_EMP_RATE    = 0.0075
+const ESI_EMPR_RATE   = 0.0325
+const ESI_GROSS_LIMIT = 21000
+const PT_THRESHOLD    = 10000
+const PT_AMOUNT       = 200
+
+function computeStatutory(monthlyGross: number, basicAmount: number) {
+  const pfBase     = Math.min(basicAmount, PF_BASIC_CAP)
+  const pfEmployee = Math.min(pfBase * PF_RATE, PF_MAX_MONTHLY)
+  const pfEmployer = pfEmployee
+
+  const esiApplicable = monthlyGross <= ESI_GROSS_LIMIT
+  const esiEmployee = esiApplicable ? monthlyGross * ESI_EMP_RATE : 0
+  const esiEmployer = esiApplicable ? monthlyGross * ESI_EMPR_RATE : 0
+
+  const professionalTax = monthlyGross > PT_THRESHOLD ? PT_AMOUNT : 0
+
+  const netSalary = monthlyGross - pfEmployee - esiEmployee - professionalTax
+
+  return { pfEmployee, pfEmployer, esiApplicable, esiEmployee, esiEmployer, professionalTax, netSalary }
+}
+
+// Allowed %-of-basis ranges + industry-standard defaults for the common earning codes.
+// Unlisted codes (custom catalog additions) are left unconstrained.
+const COMPONENT_PCT_RANGES: Record<string, { min: number; max: number; default: number }> = {
+  BASIC:      { min: 40, max: 50, default: 45 },   // % of monthly gross
+  HRA:        { min: 30, max: 50, default: 40 },   // % of Basic
+  DA:         { min: 5,  max: 10, default: 7.5 },  // % of Basic
+  CONVEYANCE: { min: 5,  max: 10, default: 7.5 },  // % of Basic
+  MEDICAL:    { min: 5,  max: 10, default: 7.5 },  // % of Basic
+  TRANSPORT:  { min: 5,  max: 10, default: 7.5 },  // % of Basic
 }
 
 // ── Payslip detail dialog ─────────────────────────────────────────────────────
 
 function PayslipDetailDialog({ payslip, onClose }: { payslip: Payslip; onClose: () => void }) {
+  const [downloading, setDownloading] = useState(false)
   const title = `${payslip.employeeName} — ${MONTH_NAMES[payslip.month - 1]} ${payslip.year}`
+
+  // A plain <a href="/api/..."> navigates the browser directly, which never attaches the
+  // JWT bearer token (only axios's request interceptor does that) — the API then 403s with
+  // an empty body, rendering as a blank tab. Fetch the PDF as an authenticated blob instead.
+  async function handleDownloadPdf() {
+    setDownloading(true)
+    try {
+      const res = await payrollService.downloadPayslipPdf(payslip.id)
+      const url = URL.createObjectURL(new Blob([res.data as BlobPart], { type: "application/pdf" }))
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `payslip_${payslip.year}_${String(payslip.month).padStart(2, "0")}_${payslip.employeeCode}.pdf`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      toastApiError(err, "Failed to download payslip PDF.")
+    } finally {
+      setDownloading(false)
+    }
+  }
+
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-lg">
@@ -93,19 +207,16 @@ function PayslipDetailDialog({ payslip, onClose }: { payslip: Payslip; onClose: 
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Earnings</p>
             <table className="w-full text-sm">
               <tbody>
-                {[
-                  ["Basic",            payslip.basic],
-                  ["HRA",              payslip.hra],
-                  ["Dearness Allow.",  payslip.da],
-                  ["Conveyance",       payslip.conveyance],
-                  ["Medical Allow.",   payslip.medicalAllowance],
-                  ["Special Allow.",   payslip.specialAllowance],
-                ].map(([label, val]) => (
-                  <tr key={label as string} className="border-b last:border-0">
-                    <td className="py-1 text-muted-foreground">{label}</td>
-                    <td className="py-1 text-right font-mono">{inr(val as number)}</td>
-                  </tr>
-                ))}
+                {(payslip.components ?? []).length === 0 ? (
+                  <tr><td className="py-1 text-muted-foreground" colSpan={2}>No components</td></tr>
+                ) : (
+                  payslip.components.map((c) => (
+                    <tr key={c.payrollComponentId} className="border-b last:border-0">
+                      <td className="py-1 text-muted-foreground">{displayComponentName(c.name)}</td>
+                      <td className="py-1 text-right font-mono">{inr(c.amount)}</td>
+                    </tr>
+                  ))
+                )}
               </tbody>
               <tfoot>
                 <tr className="font-semibold">
@@ -144,16 +255,10 @@ function PayslipDetailDialog({ payslip, onClose }: { payslip: Payslip; onClose: 
 
         <DialogFooter>
           {payslip.pdfUrl && (
-            <a
-              href={`/api/payroll/payslips/${payslip.id}/pdf`}
-              target="_blank"
-              rel="noreferrer"
-            >
-              <Button variant="outline" size="sm">
-                <FileDown className="mr-2 h-4 w-4" />
-                Download PDF
-              </Button>
-            </a>
+            <Button variant="outline" size="sm" onClick={handleDownloadPdf} disabled={downloading}>
+              <FileDown className="mr-2 h-4 w-4" />
+              {downloading ? "Downloading…" : "Download PDF"}
+            </Button>
           )}
           <DialogClose asChild><Button>Close</Button></DialogClose>
         </DialogFooter>
@@ -257,6 +362,10 @@ function NewRunDialog({ open, onOpenChange, onCreated }: NewRunDialogProps) {
   const [year, setYear]   = useState<string>(String(currentYear))
   const [saving, setSaving] = useState(false)
 
+  const { isDirty } = useFormSnapshot(open, { month, year })
+  const { confirmOpen, setConfirmOpen, requestClose, confirmDiscard } =
+    useConfirmClose(() => onOpenChange(false))
+
   function handleSubmit() {
     const m = parseInt(month, 10)
     const y = parseInt(year, 10)
@@ -277,7 +386,8 @@ function NewRunDialog({ open, onOpenChange, onCreated }: NewRunDialogProps) {
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+    <Dialog open={open} onOpenChange={(next) => { if (next) onOpenChange(true); else requestClose(isDirty()) }}>
       <DialogContent className="max-w-sm">
         <DialogHeader><DialogTitle>New Payroll Run</DialogTitle></DialogHeader>
         <div className="space-y-4 py-2">
@@ -304,6 +414,16 @@ function NewRunDialog({ open, onOpenChange, onCreated }: NewRunDialogProps) {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <ConfirmDialog
+      open={confirmOpen}
+      onOpenChange={setConfirmOpen}
+      title="Discard changes?"
+      description="You have unsaved changes in this form. Are you sure you want to cancel? Your changes will be lost."
+      confirmLabel="Discard"
+      cancelLabel="Keep Editing"
+      onConfirm={confirmDiscard}
+    />
+    </>
   )
 }
 
@@ -314,18 +434,63 @@ interface SalaryStructureDialogProps {
   onOpenChange: (v: boolean) => void
 }
 
+type CtcBasis = "CTC" | "MONTHLY_GROSS" | "BASIC"
+
 function SalaryStructureDialog({ open, onOpenChange }: SalaryStructureDialogProps) {
   const [employees, setEmployees] = useState<{ id: string; fullName: string; employeeCode: string }[]>([])
   const [employeeId, setEmployeeId]   = useState("NONE")
-  const [annualCtc, setAnnualCtc]     = useState("")
+  const [basis, setBasis]             = useState<CtcBasis>("CTC")
+  const [amountInput, setAmountInput] = useState("")
   const [effectiveFrom, setEffectiveFrom] = useState(
     new Date().toISOString().slice(0, 10)
   )
   const [saving, setSaving]           = useState(false)
+  const [loadingExisting, setLoadingExisting] = useState(false)
   const [existing, setExisting]       = useState<SalaryStructureResponse | null>(null)
+  const [catalog, setCatalog]         = useState<PayrollComponent[]>([])
+  const [rows, setRows]               = useState<ComponentRow[]>([])
 
+  // Re-baselined every time the catalog defaults or a selected employee's existing
+  // structure finishes loading (see the two effects below) — "dirty" means edited
+  // since that load, not merely different from whatever was on screen at dialog open.
+  const snapshotRef = useRef({ amountInput: "", basis: "CTC" as CtcBasis, rows: [] as ComponentRow[] })
+  function snapshot(next: { amountInput: string; basis: CtcBasis; rows: ComponentRow[] }) {
+    snapshotRef.current = next
+  }
+  function isDirty(): boolean {
+    return JSON.stringify({ amountInput, basis, rows })
+      !== JSON.stringify(snapshotRef.current)
+  }
+  const { confirmOpen, setConfirmOpen, requestClose, confirmDiscard } =
+    useConfirmClose(() => onOpenChange(false))
+
+  function rowsFromCatalog(cat: PayrollComponent[]): ComponentRow[] {
+    return cat.map((c) => ({
+      payrollComponentId: c.id,
+      code: c.code,
+      name: c.name,
+      calculationType: c.calculationType,
+      value: c.value,
+      percentageOfComponentId: c.percentageOfComponentId,
+    }))
+  }
+
+  // Load the earning-component catalog once when the dialog opens
   useEffect(() => {
     if (!open) return
+    payrollService.getActiveComponents()
+      .then((res) => {
+        const d = (res.data as any)?.data ?? res.data
+        const earnings: PayrollComponent[] = (Array.isArray(d) ? d : [])
+          .filter((c: PayrollComponent) => c.componentType === "EARNING")
+          .sort((a: PayrollComponent, b: PayrollComponent) => a.displayOrder - b.displayOrder)
+        setCatalog(earnings)
+        const defaultRows = rowsFromCatalog(earnings)
+        setRows(defaultRows)
+        snapshot({ amountInput: "", basis: "CTC", rows: defaultRows })
+      })
+      .catch((err) => toastApiError(err, "Failed to load payroll components."))
+
     employeeService.getSummaries()
       .then((res) => {
         const d = (res.data as any)?.data ?? res.data
@@ -334,57 +499,143 @@ function SalaryStructureDialog({ open, onOpenChange }: SalaryStructureDialogProp
       .catch(() => {})
   }, [open])
 
-  // Load current active structure when employee changes
+  // Load current active structure when employee changes, and seed row overrides from it
   useEffect(() => {
-    if (employeeId === "NONE") { setExisting(null); return }
+    if (employeeId === "NONE" || catalog.length === 0) {
+      setExisting(null)
+      return
+    }
+    setLoadingExisting(true)
     payrollService.getActiveSalaryStructure(employeeId)
       .then((res) => {
-        const d = (res.data as any)?.data ?? res.data
-        setExisting(d ?? null)
-        if (d?.annualCtc) setAnnualCtc(String(d.annualCtc))
+        const d: SalaryStructureResponse | null = (res.data as any)?.data ?? res.data ?? null
+        setExisting(d)
+        setBasis("CTC")
+        const nextAmount = d?.annualCtc ? String(d.annualCtc) : amountInput
+        if (d?.annualCtc) setAmountInput(nextAmount)
+        let nextRows = rows
+        if (d?.components?.length) {
+          const byId = new Map(d.components.map((c) => [c.payrollComponentId, c]))
+          nextRows = catalog.map((c) => {
+            const override = byId.get(c.id)
+            return {
+              payrollComponentId: c.id,
+              code: c.code,
+              name: c.name,
+              calculationType: override?.calculationType ?? c.calculationType,
+              value: override?.value ?? c.value,
+              percentageOfComponentId: c.percentageOfComponentId,
+            }
+          })
+          setRows(nextRows)
+        }
+        snapshot({ amountInput: nextAmount, basis: "CTC", rows: nextRows })
       })
-      .catch(() => setExisting(null))
-  }, [employeeId])
+      .catch(() => {
+        setExisting(null)
+        setBasis("CTC")
+        setAmountInput("")
+        // No existing structure — reset rows to catalog defaults
+        const defaultRows = rowsFromCatalog(catalog)
+        setRows(defaultRows)
+        snapshot({ amountInput: "", basis: "CTC", rows: defaultRows })
+      })
+      .finally(() => setLoadingExisting(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employeeId, catalog])
 
-  const ctcNum = parseFloat(annualCtc) || 0
-  const preview = ctcNum > 0 ? computeBreakdown(ctcNum) : null
+  // Basic drives the CTC <-> Basic conversion only when it's configured as a plain
+  // percentage of monthly gross (the standard case). If HR has set Basic to FIXED or
+  // chained it to another component, "enter CTC by Basic" can't be inverted client-side.
+  const basicRow = rows.find((r) => r.code === "BASIC")
+  const basicPctOfGross = (basicRow && basicRow.calculationType === "PERCENTAGE"
+    && !basicRow.percentageOfComponentId && basicRow.value)
+    ? basicRow.value / 100
+    : null
+
+  function annualCtcFrom(amt: number, b: CtcBasis): number {
+    if (!amt || amt <= 0) return 0
+    if (b === "CTC") return amt
+    if (b === "MONTHLY_GROSS") return amt * 12
+    // BASIC
+    if (!basicPctOfGross) return 0
+    return (amt / basicPctOfGross) * 12
+  }
+
+  const ctcNum = annualCtcFrom(parseFloat(amountInput) || 0, basis)
+  const monthlyGrossNum = ctcNum > 0 ? ctcNum / 12 : 0
+
+  function handleBasisChange(newBasis: CtcBasis) {
+    const currentAnnual = ctcNum
+    setBasis(newBasis)
+    if (!currentAnnual) { setAmountInput(""); return }
+    const monthlyGross = currentAnnual / 12
+    if (newBasis === "CTC") setAmountInput(currentAnnual.toFixed(2))
+    else if (newBasis === "MONTHLY_GROSS") setAmountInput(monthlyGross.toFixed(2))
+    else setAmountInput(basicPctOfGross ? (monthlyGross * basicPctOfGross).toFixed(2) : "")
+  }
+
+  const preview = ctcNum > 0 && rows.length > 0 ? computeBreakdown(ctcNum, rows) : null
+  const statutory = preview
+    ? computeStatutory(preview.monthlyGross, basicRow ? (preview.amounts[basicRow.payrollComponentId] ?? 0) : 0)
+    : null
+
+  const invalidRows = rows.filter((r) => {
+    const range = COMPONENT_PCT_RANGES[r.code]
+    if (!range || r.calculationType !== "PERCENTAGE") return false
+    return r.value == null || r.value < range.min || r.value > range.max
+  })
+
+  function updateRow(id: string, patch: Partial<ComponentRow>) {
+    setRows((prev) => prev.map((r) => (r.payrollComponentId === id ? { ...r, ...patch } : r)))
+  }
 
   function handleSave() {
     if (employeeId === "NONE" || !ctcNum || !effectiveFrom) {
       toast.error("Please fill all fields.")
       return
     }
+    if (invalidRows.length > 0) {
+      toast.error(`${invalidRows.map((r) => displayComponentName(r.name)).join(", ")} ${invalidRows.length > 1 ? "are" : "is"} outside the allowed % range.`)
+      return
+    }
+    const components: SalaryStructureComponentInput[] = rows.map((r) => ({
+      payrollComponentId: r.payrollComponentId,
+      calculationType: r.calculationType,
+      value: r.calculationType === "FORMULA" ? null : r.value,
+    }))
     setSaving(true)
-    payrollService.createSalaryStructure({ employeeId, annualCtc: ctcNum, effectiveFrom })
+    payrollService.createSalaryStructure({ employeeId, annualCtc: ctcNum, effectiveFrom, components })
       .then(() => {
         toast.success("Salary structure saved.")
         onOpenChange(false)
-        setAnnualCtc(""); setEmployeeId("NONE"); setExisting(null)
+        setAmountInput(""); setBasis("CTC"); setEmployeeId("NONE"); setExisting(null)
       })
       .catch((err) => toastApiError(err, "Failed to save salary structure."))
       .finally(() => setSaving(false))
   }
 
+  const basisPlaceholder = basis === "CTC" ? "e.g. 600000 / year"
+    : basis === "MONTHLY_GROSS" ? "e.g. 50000 / month"
+    : "e.g. 22500 / month"
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+    <>
+    <Dialog open={open} onOpenChange={(next) => { if (next) onOpenChange(true); else requestClose(isDirty()) }}>
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader><DialogTitle>Set Employee CTC</DialogTitle></DialogHeader>
 
-        <div className="space-y-4">
+        <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
           {/* Employee picker */}
           <div className="space-y-1.5">
             <Label>Employee</Label>
-            <Select value={employeeId} onValueChange={setEmployeeId}>
-              <SelectTrigger><SelectValue placeholder="Select employee" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="NONE">— Select —</SelectItem>
-                {employees.map((e) => (
-                  <SelectItem key={e.id} value={e.id}>
-                    {e.fullName} ({e.employeeCode})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Combobox
+              options={employees.map((e) => ({ value: e.id, label: `${e.fullName} (${e.employeeCode})` }))}
+              value={employeeId === "NONE" ? "" : employeeId}
+              onChange={setEmployeeId}
+              placeholder="Select employee"
+              searchPlaceholder="Search employees…"
+            />
             {existing && (
               <p className="text-xs text-muted-foreground">
                 Current CTC: {inr(existing.annualCtc)}/yr (effective {existing.effectiveFrom})
@@ -392,56 +643,194 @@ function SalaryStructureDialog({ open, onOpenChange }: SalaryStructureDialogProp
             )}
           </div>
 
-          {/* Annual CTC */}
-          <div className="space-y-1.5">
-            <Label>Annual CTC (₹)</Label>
-            <Input type="number" min={0} placeholder="e.g. 600000"
-              value={annualCtc} onChange={(e) => setAnnualCtc(e.target.value)} />
+          <div className="grid grid-cols-2 gap-3">
+            {/* CTC input basis + amount */}
+            <div className="space-y-1.5">
+              <Label>Enter CTC By</Label>
+              <div className="flex gap-2">
+                <Select value={basis} onValueChange={(v) => handleBasisChange(v as CtcBasis)}>
+                  <SelectTrigger className="w-[9.5rem]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="CTC">Annual CTC</SelectItem>
+                    <SelectItem value="MONTHLY_GROSS">Monthly Gross</SelectItem>
+                    <SelectItem value="BASIC">Monthly Basic</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Input type="number" min={0} step="0.01" placeholder={basisPlaceholder}
+                  value={amountInput} onChange={(e) => setAmountInput(e.target.value)} />
+              </div>
+              {basis === "BASIC" && !basicPctOfGross && (
+                <p className="text-xs text-destructive">
+                  Basic isn't configured as a % of gross, so it can't be used to back into CTC.
+                </p>
+              )}
+              {ctcNum > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  ≈ {inr(ctcNum)}/yr CTC · {inr(monthlyGrossNum)}/mo gross
+                </p>
+              )}
+            </div>
+
+            {/* Effective From */}
+            <div className="space-y-1.5">
+              <Label>Effective From</Label>
+              <Input type="date" value={effectiveFrom}
+                onChange={(e) => setEffectiveFrom(e.target.value)} />
+            </div>
           </div>
 
-          {/* Effective From */}
+          {/* Salary component breakdown — fixed amount or variable % per component */}
           <div className="space-y-1.5">
-            <Label>Effective From</Label>
-            <Input type="date" value={effectiveFrom}
-              onChange={(e) => setEffectiveFrom(e.target.value)} />
-          </div>
-
-          {/* Live breakdown preview */}
-          {preview && (
-            <div className="rounded-lg border bg-muted/30 p-3">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Monthly Breakdown Preview
+            <Label>Salary Components</Label>
+            <p className="text-xs text-muted-foreground -mt-1">
+              Basic is a % of monthly gross; every other component here is a % of Basic (or a
+              fixed ₹ amount). One component may be left as Formula to auto-absorb the remainder.
+            </p>
+            {rows.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-2">
+                {loadingExisting ? "Loading…" : "No active earning components configured."}
               </p>
-              <table className="w-full text-sm">
-                <tbody>
-                  {[
-                    ["Monthly Gross",       preview.monthly],
-                    ["Basic (40%)",         preview.basic],
-                    ["HRA (20%)",           preview.hra],
-                    ["DA (10%)",            preview.da],
-                    ["Conveyance (10%)",    preview.conveyance],
-                    ["Medical Allow. (5%)", preview.medical],
-                    ["Special Allow.",      preview.special],
-                  ].map(([label, val]) => (
-                    <tr key={label as string} className="border-b last:border-0">
-                      <td className="py-0.5 text-muted-foreground">{label}</td>
-                      <td className="py-0.5 text-right font-mono text-xs">{inr(val as number)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            ) : (
+              <div className="rounded-lg border overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Component</TableHead>
+                      <TableHead className="w-32 text-center">Type</TableHead>
+                      <TableHead className="w-32 text-center">Value</TableHead>
+                      <TableHead className="w-28 text-center">Monthly ₹</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {rows.map((r) => {
+                      const amount = preview?.amounts[r.payrollComponentId]
+                      const range = COMPONENT_PCT_RANGES[r.code]
+                      const isPct = r.calculationType === "PERCENTAGE"
+                      const outOfRange = isPct && !!range
+                        && (r.value == null || r.value < range.min || r.value > range.max)
+                      const basisLabel = r.percentageOfComponentId
+                        ? `% of ${displayComponentName(catalog.find((c) => c.id === r.percentageOfComponentId)?.name ?? "component")}`
+                        : "% of Gross"
+                      return (
+                        <TableRow key={r.payrollComponentId}>
+                          <TableCell className="font-medium">{displayComponentName(r.name)}</TableCell>
+                          <TableCell>
+                            <Select
+                              value={r.calculationType}
+                              onValueChange={(v) => updateRow(r.payrollComponentId, { calculationType: v as CalculationType })}
+                            >
+                              <SelectTrigger className="h-8 w-full"><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="FIXED">Fixed (₹)</SelectItem>
+                                <SelectItem value="PERCENTAGE">Percentage</SelectItem>
+                                <SelectItem value="FORMULA">Formula</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                          <TableCell className="text-right align-top">
+                            {r.calculationType === "FORMULA" ? (
+                              <div className="inline-flex items-center gap-1.5 h-8 px-2.5 bg-muted/50 border border-input rounded-md text-muted-foreground select-none float-right">
+                                    {/* Auto Text */}
+                                                                        <span className="text-xs font-medium">auto</span>
+                                    {/* Lock Icon */}
+                                    <svg xmlns="http://w3.org" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" className="w-3.5 h-3.5 text-muted-foreground/70">
+                                      <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                                    </svg>
+
+                                  </div>
+                            ) : (
+                              <div>
+                                <Input
+                                  type="number" min={0} step="1"
+                                  className={`h-8 text-right ${outOfRange ? "border-destructive focus-visible:ring-destructive" : ""}`}
+                                  value={r.value ?? ""}
+                                  onChange={(e) => updateRow(r.payrollComponentId, {
+                                    value: e.target.value === "" ? null : parseFloat(e.target.value),
+                                  })}
+                                />
+                                {isPct && (
+                                  <p className={`mt-0.5 text-[10px] ${outOfRange ? "text-destructive" : "text-muted-foreground"}`}>
+                                    {basisLabel}{range ? ` · ${range.min}–${range.max}%` : ""}
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-xs">
+                            {amount != null ? inr(amount) : "—"}
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </div>
+
+          {/* Live breakdown preview: gross, components, and statutory deductions */}
+          {preview && (
+            <div className={`rounded-lg border p-3 space-y-2 ${preview.reconciled ? "bg-muted/30" : "border-destructive/50 bg-destructive/5"}`}>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Monthly Gross
+                </span>
+                <span className="font-mono font-semibold">{inr(preview.monthlyGross)}</span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-xs text-muted-foreground">Sum of components</span>
+                <span className="font-mono">{inr(preview.total)}</span>
+              </div>
+              {!preview.reconciled && (
+                <p className="text-xs text-destructive">
+                  Components don't add up to monthly gross. Adjust the percentages/amounts, or
+                  set one component to Formula to auto-absorb the remainder.
+                </p>
+              )}
+              {statutory && (
+                <div className="border-t pt-2 space-y-1">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-xs text-muted-foreground">PF (employee, 12% of Basic capped)</span>
+                    <span className="font-mono">−{inr(statutory.pfEmployee)}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-xs text-muted-foreground">
+                      ESI (employee) {!statutory.esiApplicable && "— N/A, gross > ₹21,000"}
+                    </span>
+                    <span className="font-mono">−{inr(statutory.esiEmployee)}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-xs text-muted-foreground">Professional Tax</span>
+                    <span className="font-mono">−{inr(statutory.professionalTax)}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm font-semibold pt-1">
+                    <span>Net Salary (before TDS)</span>
+                    <span className="font-mono">{inr(statutory.netSalary)}</span>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
 
         <DialogFooter>
           <DialogClose asChild><Button variant="outline" disabled={saving}>Cancel</Button></DialogClose>
-          <Button onClick={handleSave} disabled={saving || employeeId === "NONE"}>
+          <Button onClick={handleSave} disabled={saving || employeeId === "NONE" || invalidRows.length > 0}>
             {saving ? "Saving…" : "Save CTC"}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <ConfirmDialog
+      open={confirmOpen}
+      onOpenChange={setConfirmOpen}
+      title="Discard changes?"
+      description="You have unsaved changes in this form. Are you sure you want to cancel? Your changes will be lost."
+      confirmLabel="Discard"
+      cancelLabel="Keep Editing"
+      onConfirm={confirmDiscard}
+    />
+    </>
   )
 }
 
@@ -473,6 +862,10 @@ function GeneratePayslipDialog({ open, onOpenChange }: GeneratePayslipDialogProp
       .catch(() => {})
   }, [open])
 
+  const { isDirty: formIsDirty } = useFormSnapshot(open, { employeeId, month, year })
+  // Once a payslip is generated there's nothing left to lose by closing.
+  const isDirty = () => !generated && formIsDirty()
+
   function handleClose() {
     setEmployeeId("NONE")
     setMonth(String(currentMonth))
@@ -480,6 +873,8 @@ function GeneratePayslipDialog({ open, onOpenChange }: GeneratePayslipDialogProp
     setGenerated(null)
     onOpenChange(false)
   }
+
+  const { confirmOpen, setConfirmOpen, requestClose, confirmDiscard } = useConfirmClose(handleClose)
 
   function handleGenerate() {
     const m = parseInt(month, 10)
@@ -500,7 +895,8 @@ function GeneratePayslipDialog({ open, onOpenChange }: GeneratePayslipDialogProp
   }
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) handleClose() }}>
+    <>
+    <Dialog open={open} onOpenChange={(o) => { if (!o) requestClose(isDirty()) }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader><DialogTitle>Generate Payslip</DialogTitle></DialogHeader>
 
@@ -536,17 +932,13 @@ function GeneratePayslipDialog({ open, onOpenChange }: GeneratePayslipDialogProp
           <div className="space-y-4">
             <div className="space-y-1.5">
               <Label>Employee</Label>
-              <Select value={employeeId} onValueChange={setEmployeeId}>
-                <SelectTrigger><SelectValue placeholder="Select employee" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="NONE">— Select —</SelectItem>
-                  {employees.map((e) => (
-                    <SelectItem key={e.id} value={e.id}>
-                      {e.fullName} ({e.employeeCode})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Combobox
+                options={employees.map((e) => ({ value: e.id, label: `${e.fullName} (${e.employeeCode})` }))}
+                value={employeeId === "NONE" ? "" : employeeId}
+                onChange={setEmployeeId}
+                placeholder="Select employee"
+                searchPlaceholder="Search employees…"
+              />
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -578,6 +970,16 @@ function GeneratePayslipDialog({ open, onOpenChange }: GeneratePayslipDialogProp
         )}
       </DialogContent>
     </Dialog>
+    <ConfirmDialog
+      open={confirmOpen}
+      onOpenChange={setConfirmOpen}
+      title="Discard changes?"
+      description="You have unsaved changes in this form. Are you sure you want to cancel? Your changes will be lost."
+      confirmLabel="Discard"
+      cancelLabel="Keep Editing"
+      onConfirm={confirmDiscard}
+    />
+    </>
   )
 }
 
